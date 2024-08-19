@@ -32,3 +32,21 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+# Draft or auto-saved version
+# Note that the leading "**/" appears necessary for Docker even if not for Git
+**/*.draft.*
+**/*.draft
+**/*.orig
+**/*.bak
+**/*~
+
+# Editor-specific files
+*.sw*
+*~
+
+# macOS special files and folders
+**/.DS_Store
+**/.CFUserTextEncoding
+**/.Trash/
+**/$RECYCLE.BIN/
