@@ -5,6 +5,7 @@ locals {
 resource "aws_cloudhsm_v2_cluster" "cloudhsm_v2_cluster" {
   count             = local.enabled ? 1 : 0
   hsm_type          = var.hsm_type
+  mode              = "FIPS"
   subnet_ids        = var.cluster_subnets
   tags              = module.this.tags
 }
