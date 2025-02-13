@@ -16,7 +16,7 @@ data "aws_cloudhsm_v2_cluster" "cloudhsm_v2_cluster" {
 
 resource "aws_cloudhsm_v2_hsm" "hsm" {
   depends_on = [data.aws_cloudhsm_v2_cluster.cloudhsm_v2_cluster]
-  count      = data.aws_cloudhsm_v2_cluster.cloudhsm_v2_cluster.cluster_state == "UNINITIALIZED" ? 1 : length(var.hsm_subnets)
+  count      = length(var.hsm_subnets)
   subnet_id  = var.hsm_subnets[count.index]
   cluster_id = data.aws_cloudhsm_v2_cluster.cloudhsm_v2_cluster.cluster_id
 }
