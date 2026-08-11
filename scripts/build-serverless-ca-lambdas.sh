@@ -45,7 +45,8 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 root = Path("/tmp/package")
-target = Path("/out") / f"{os.environ['FUNCTION_NAME']}.zip"
+function_name = os.environ["FUNCTION_NAME"]
+target = Path("/out") / f"{function_name}.zip"
 with ZipFile(target, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
         relative = path.relative_to(root).as_posix()
