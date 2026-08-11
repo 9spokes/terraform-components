@@ -1,0 +1,12 @@
+bandit == 1.9.4
+black ==26.5.1
+boto3 ==1.43.52
+cryptography == 50.0.0
+dataclasses-json == 0.6.7
+pip-audit == 2.10.1
+prospector ==1.19.1
+pytest == 9.0.2
+requests ==2.34.2
+slack-sdk ==3.43.0
+structlog ==26.1.0
+validators == 0.35.0

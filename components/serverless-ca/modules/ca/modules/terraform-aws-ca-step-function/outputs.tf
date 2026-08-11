@@ -1,0 +1,11 @@
+output "state_machine_arn" {
+  value = aws_sfn_state_machine.state_machine.arn
+}
+
+output "state_machine_name" {
+  value = aws_sfn_state_machine.state_machine.name
+}
+
+output "log_retention_in_days" {
+  value = var.retention_in_days
+}

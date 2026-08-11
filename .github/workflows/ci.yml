@@ -1,0 +1,102 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1
+        with:
+          tofu_version: 1.12.4
+
+      - name: Format
+        run: tofu fmt -check -recursive components/serverless-ca
+
+      - name: Validate component
+        working-directory: components/serverless-ca
+        run: |
+          tofu init -backend=false -input=false
+          tofu validate
+          tofu test -no-color
+
+      - name: Validate adapted module
+        working-directory: components/serverless-ca/modules/ca
+        run: |
+          tofu init -backend=false -input=false
+          tofu validate
+          tofu test -no-color
+
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: components/serverless-ca/modules/ca
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: components/serverless-ca/modules/ca/modules/terraform-aws-ca-lambda/requirements-dev.lock
+
+      - name: Install hash-locked development dependencies
+        run: python -m pip install --require-hashes --requirement modules/terraform-aws-ca-lambda/requirements-dev.lock
+
+      - name: Upstream unit tests
+        run: pytest -q modules/terraform-aws-ca-lambda/unittests
+
+      - name: Dependency audit
+        shell: bash
+        run: |
+          for lock in modules/terraform-aws-ca-lambda/lambda_code/*/requirements.lock; do
+            pip-audit --require-hashes --requirement "$lock"
+          done
+
+      - name: Static security checks
+        run: bandit -q -r modules/terraform-aws-ca-lambda/lambda_code modules/terraform-aws-ca-lambda/utils
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build Lambda packages twice
+        run: |
+          scripts/build-serverless-ca-lambdas.sh "${RUNNER_TEMP}/build-a"
+          scripts/build-serverless-ca-lambdas.sh "${RUNNER_TEMP}/build-b"
+          diff -u "${RUNNER_TEMP}/build-a/SHA256SUMS" "${RUNNER_TEMP}/build-b/SHA256SUMS"
+
+      - name: Build component package twice
+        run: |
+          scripts/package-serverless-ca-component.py "${RUNNER_TEMP}/component-a.zip"
+          scripts/package-serverless-ca-component.py "${RUNNER_TEMP}/component-b.zip"
+          test "$(sha256sum "${RUNNER_TEMP}/component-a.zip" | cut -d " " -f 1)" = "$(sha256sum "${RUNNER_TEMP}/component-b.zip" | cut -d " " -f 1)"
+
+      - name: Upload verification packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: serverless-ca-packages
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/build-a/*.zip
+            ${{ runner.temp }}/build-a/SHA256SUMS
+            ${{ runner.temp }}/component-a.zip
+          retention-days: 7
