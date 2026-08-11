@@ -1,0 +1,103 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1
+        with:
+          tofu_version: 1.12.4
+
+      - name: Verify Terraform component and module
+        run: |
+          tofu fmt -check -recursive components/serverless-ca
+          tofu -chdir=components/serverless-ca init -backend=false -input=false
+          tofu -chdir=components/serverless-ca validate
+          tofu -chdir=components/serverless-ca test -no-color
+          tofu -chdir=components/serverless-ca/modules/ca init -backend=false -input=false
+          tofu -chdir=components/serverless-ca/modules/ca validate
+          tofu -chdir=components/serverless-ca/modules/ca test -no-color
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: components/serverless-ca/modules/ca/modules/terraform-aws-ca-lambda/requirements-dev.lock
+
+      - name: Verify Python source and dependencies
+        working-directory: components/serverless-ca/modules/ca
+        run: |
+          python -m pip install --require-hashes --requirement modules/terraform-aws-ca-lambda/requirements-dev.lock
+          pytest -q modules/terraform-aws-ca-lambda/unittests
+          for lock in modules/terraform-aws-ca-lambda/lambda_code/*/requirements.lock; do
+            pip-audit --require-hashes --requirement "$lock"
+          done
+          bandit -q -r modules/terraform-aws-ca-lambda/lambda_code modules/terraform-aws-ca-lambda/utils
+
+      - name: Build and verify Lambda packages
+        run: |
+          scripts/build-serverless-ca-lambdas.sh "${RUNNER_TEMP}/build-a"
+          scripts/build-serverless-ca-lambdas.sh "${RUNNER_TEMP}/build-b"
+          diff -u "${RUNNER_TEMP}/build-a/SHA256SUMS" "${RUNNER_TEMP}/build-b/SHA256SUMS"
+          mkdir -p dist
+          cp "${RUNNER_TEMP}/build-a/"*.zip dist/
+
+      - name: Build and verify component package
+        run: |
+          scripts/package-serverless-ca-component.py "${RUNNER_TEMP}/serverless-ca-component-a.zip"
+          scripts/package-serverless-ca-component.py "${RUNNER_TEMP}/serverless-ca-component-b.zip"
+          test "$(sha256sum "${RUNNER_TEMP}/serverless-ca-component-a.zip" | cut -d " " -f 1)" = "$(sha256sum "${RUNNER_TEMP}/serverless-ca-component-b.zip" | cut -d " " -f 1)"
+          cp "${RUNNER_TEMP}/serverless-ca-component-a.zip" dist/serverless-ca-component.zip
+
+      - name: Generate component SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: components/serverless-ca
+          format: spdx-json
+          output-file: dist/serverless-ca-component.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate Lambda package SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: dist
+          format: spdx-json
+          output-file: dist/serverless-ca-lambdas.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Record build provenance and checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          python scripts/write-serverless-ca-provenance.py dist dist/provenance.json
+          (cd dist && sha256sum -- * | grep -v ' SHA256SUMS$' | sort -k2 > SHA256SUMS)
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: dist/*
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/*

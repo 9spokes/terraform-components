@@ -1,0 +1,578 @@
+module "kms_tls_keygen" {
+  # Symmetric KMS key used for asymmetric key generation for TLS certs without CSR
+  source = "./modules/terraform-aws-ca-kms"
+
+  project     = "${var.project}-tls-keygen"
+  env         = var.env
+  prod_envs   = var.prod_envs
+  description = "${var.project}-${var.env} asymmetric key generation for TLS certs without CSR"
+  tags        = var.tags
+}
+
+module "kms_rsa_root_ca" {
+  # Root CA private / public key pair
+  source = "./modules/terraform-aws-ca-kms"
+
+  project                  = "${var.project}-root-ca"
+  env                      = var.env
+  prod_envs                = var.prod_envs
+  description              = "${var.project}-${var.env} Root CA key pair"
+  customer_master_key_spec = var.root_ca_key_spec
+  key_usage                = "SIGN_VERIFY"
+  kms_policy               = "ca"
+  tags                     = var.tags
+}
+
+module "kms_rsa_issuing_ca" {
+  # Issuing CA private / public key pair
+  source = "./modules/terraform-aws-ca-kms"
+
+  project                  = "${var.project}-issuing-ca"
+  env                      = var.env
+  prod_envs                = var.prod_envs
+  description              = "${var.project}-${var.env} Issuing CA key pair"
+  customer_master_key_spec = var.issuing_ca_key_spec
+  key_usage                = "SIGN_VERIFY"
+  kms_policy               = "ca"
+  tags                     = var.tags
+}
+
+module "dynamodb" {
+  # Stores certificate details and private keys of TLS certs without CSR
+  source = "./modules/terraform-aws-ca-dynamodb"
+
+  project                    = var.project
+  env                        = var.env
+  kms_arn_resource           = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  enable_deletion_protection = var.dynamodb_deletion_protection
+  tags                       = merge(var.tags, var.additional_dynamodb_tags)
+}
+
+module "external_s3" {
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not needed for long-lived static content
+  # S3 bucket for CRL and CA certificate publication
+  source = "./modules/terraform-aws-ca-s3"
+
+  purpose                = "${var.project}-ca-external-${var.env}"
+  global_bucket          = true
+  bucket_prefix          = var.bucket_prefix
+  access_logs            = var.access_logs
+  log_bucket             = var.log_bucket
+  oai_arn                = var.public_crl ? module.ca_cloudfront[0].cloudfront_origin_access_identity_arn : ""
+  public_crl             = var.public_crl
+  server_side_encryption = true
+  sse_algorithm          = "AES256"
+  app_aws_principals     = var.external_bucket_reader_principal_arns
+  force_destroy          = false
+  tags                   = merge(var.tags, var.additional_s3_tags)
+}
+
+module "internal_s3" {
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not needed for long-lived static content
+  # S3 bucket for internal processing of JSON files for certificates to be issued and revoked
+  source = "./modules/terraform-aws-ca-s3"
+
+  purpose             = "${var.project}-ca-internal-${var.env}"
+  global_bucket       = true
+  bucket_prefix       = var.bucket_prefix
+  access_logs         = var.access_logs
+  log_bucket          = var.log_bucket
+  kms_key_alias       = var.kms_key_alias == "" ? module.kms_tls_keygen.kms_alias_name : var.kms_key_alias
+  default_aws_kms_key = var.default_aws_kms_key_for_s3
+  bucket_key_enabled  = var.bucket_key_enabled
+  force_destroy       = false
+  tags                = merge(var.tags, var.additional_s3_tags)
+}
+
+resource "aws_s3_object" "cert_info" {
+  # JSON files with details of certificates to be issued and revoked
+  for_each = toset(var.cert_info_files)
+
+  key                    = "${each.key}.json"
+  bucket                 = module.internal_s3.s3_bucket_name
+  acl                    = "private"
+  content_type           = "application/json"
+  content                = "[]"
+  kms_key_id             = var.sse_algorithm == "" ? module.kms_tls_keygen.kms_alias_target_key_arn : null
+  server_side_encryption = var.sse_algorithm == "" ? null : var.sse_algorithm
+  tags                   = var.tags
+
+  lifecycle {
+    ignore_changes = [content]
+  }
+}
+
+module "create_root_ca_iam" {
+  # IAM role and policy assumed by create Root CA lambda using KMS private key
+  source = "./modules/terraform-aws-ca-iam"
+
+  project                = var.project
+  env                    = var.env
+  function_name          = local.create_root_ca_function_name
+  kms_arn_root_ca        = module.kms_rsa_root_ca.kms_arn
+  kms_arn_resource       = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  kms_arn_tls_keygen     = module.kms_tls_keygen.kms_arn
+  ddb_table_arn          = module.dynamodb.ddb_table_arn
+  policy                 = "root_ca"
+  external_s3_bucket_arn = module.external_s3.s3_bucket_arn
+  internal_s3_bucket_arn = module.internal_s3.s3_bucket_arn
+  xray_enabled           = var.xray_enabled
+  tags                   = var.tags
+}
+
+module "create_issuing_ca_iam" {
+  # IAM role and policy assumed by create Issuing CA lambda using KMS private key
+  source = "./modules/terraform-aws-ca-iam"
+
+  project                = var.project
+  env                    = var.env
+  function_name          = local.create_issuing_ca_function_name
+  kms_arn_root_ca        = module.kms_rsa_root_ca.kms_arn
+  kms_arn_issuing_ca     = module.kms_rsa_issuing_ca.kms_arn
+  kms_arn_resource       = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  kms_arn_tls_keygen     = module.kms_tls_keygen.kms_arn
+  ddb_table_arn          = module.dynamodb.ddb_table_arn
+  policy                 = "issuing_ca"
+  external_s3_bucket_arn = module.external_s3.s3_bucket_arn
+  internal_s3_bucket_arn = module.internal_s3.s3_bucket_arn
+  xray_enabled           = var.xray_enabled
+  tags                   = var.tags
+}
+
+module "root_crl_iam" {
+  # IAM role and policy assumed by Root CA lambda using KMS private key
+  source = "./modules/terraform-aws-ca-iam"
+
+  project                = var.project
+  env                    = var.env
+  function_name          = local.root_ca_crl_function_name
+  kms_arn_root_ca        = module.kms_rsa_root_ca.kms_arn
+  kms_arn_resource       = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  kms_arn_tls_keygen     = module.kms_tls_keygen.kms_arn
+  ddb_table_arn          = module.dynamodb.ddb_table_arn
+  policy                 = "root_crl"
+  external_s3_bucket_arn = module.external_s3.s3_bucket_arn
+  internal_s3_bucket_arn = module.internal_s3.s3_bucket_arn
+  xray_enabled           = var.xray_enabled
+  tags                   = var.tags
+}
+
+module "issuing_crl_iam" {
+  # IAM role and policy assumed by Issuing CA lambda using KMS private key
+  source = "./modules/terraform-aws-ca-iam"
+
+  project                = var.project
+  env                    = var.env
+  function_name          = local.issuing_ca_crl_function_name
+  kms_arn_issuing_ca     = module.kms_rsa_issuing_ca.kms_arn
+  kms_arn_resource       = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  kms_arn_tls_keygen     = module.kms_tls_keygen.kms_arn
+  ddb_table_arn          = module.dynamodb.ddb_table_arn
+  policy                 = "issuing_crl"
+  external_s3_bucket_arn = module.external_s3.s3_bucket_arn
+  internal_s3_bucket_arn = module.internal_s3.s3_bucket_arn
+  sns_topic_arn          = module.sns_ca_notifications.sns_topic_arn
+  xray_enabled           = var.xray_enabled
+  tags                   = var.tags
+}
+
+module "tls_keygen_iam" {
+  # IAM role and policy assumed by TLS certificate lambda using issuing CA KMS private key
+  source = "./modules/terraform-aws-ca-iam"
+
+  project                = var.project
+  env                    = var.env
+  function_name          = local.tls_cert_function_name
+  kms_arn_issuing_ca     = module.kms_rsa_issuing_ca.kms_arn
+  kms_arn_tls_keygen     = module.kms_tls_keygen.kms_arn
+  kms_arn_resource       = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  ddb_table_arn          = module.dynamodb.ddb_table_arn
+  policy                 = "tls_cert"
+  external_s3_bucket_arn = module.external_s3.s3_bucket_arn
+  internal_s3_bucket_arn = module.internal_s3.s3_bucket_arn
+  sns_topic_arn          = module.sns_ca_notifications.sns_topic_arn
+  xray_enabled           = var.xray_enabled
+  tags                   = var.tags
+}
+
+module "expiry_iam" {
+  # IAM role and policy assumed by Expiry lambda
+  source = "./modules/terraform-aws-ca-iam"
+  count  = length(var.expiry_reminders) > 0 && contains(var.cert_info_files, "tls") ? 1 : 0
+
+  project                = var.project
+  env                    = var.env
+  function_name          = local.expiry_function_name
+  kms_arn_tls_keygen     = module.kms_tls_keygen.kms_arn
+  kms_arn_resource       = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  ddb_table_arn          = module.dynamodb.ddb_table_arn
+  policy                 = "expiry"
+  external_s3_bucket_arn = module.external_s3.s3_bucket_arn
+  internal_s3_bucket_arn = module.internal_s3.s3_bucket_arn
+  sns_topic_arn          = module.sns_ca_notifications.sns_topic_arn
+  xray_enabled           = var.xray_enabled
+  tags                   = var.tags
+}
+
+module "create_rsa_root_ca_lambda" {
+  # Lambda function to check for existence and otherwise create Root CA using KMS private key
+  source = "./modules/terraform-aws-ca-lambda"
+
+  project                         = var.project
+  env                             = var.env
+  prod_envs                       = var.prod_envs
+  function_name                   = local.create_root_ca_function_name
+  description                     = "Create Root Certificate Authority with KMS private key"
+  expiry_reminders                = var.expiry_reminders
+  external_s3_bucket              = module.external_s3.s3_bucket_name
+  internal_s3_bucket              = module.internal_s3.s3_bucket_name
+  logging_account_id              = var.logging_account_id
+  subscription_filter_destination = var.subscription_filter_destination
+  filter_pattern                  = var.filter_pattern
+  root_ca_info                    = var.root_ca_info
+  lambda_role_arn                 = module.create_root_ca_iam.lambda_role_arn
+  domain                          = var.hosted_zone_domain
+  runtime                         = local.runtime
+  public_crl                      = var.public_crl
+  sns_topic_arn                   = module.sns_ca_notifications.sns_topic_arn
+  xray_enabled                    = var.xray_enabled
+  artifact                        = var.lambda_artifacts["create_root_ca"]
+  retention_in_days               = var.log_retention_in_days
+  memory_size                     = var.memory_size
+  timeout                         = var.timeout
+  tags                            = merge(var.tags, var.additional_lambda_tags)
+}
+
+module "create_rsa_issuing_ca_lambda" {
+  # Lambda function to check for existence and otherwise create Issuing CA using KMS private key
+  source = "./modules/terraform-aws-ca-lambda"
+
+  project                         = var.project
+  env                             = var.env
+  prod_envs                       = var.prod_envs
+  function_name                   = local.create_issuing_ca_function_name
+  description                     = "Create Issuing Certificate Authority with KMS private key"
+  expiry_reminders                = var.expiry_reminders
+  external_s3_bucket              = module.external_s3.s3_bucket_name
+  internal_s3_bucket              = module.internal_s3.s3_bucket_name
+  logging_account_id              = var.logging_account_id
+  subscription_filter_destination = var.subscription_filter_destination
+  filter_pattern                  = var.filter_pattern
+  issuing_ca_info                 = var.issuing_ca_info
+  lambda_role_arn                 = module.create_issuing_ca_iam.lambda_role_arn
+  domain                          = var.hosted_zone_domain
+  runtime                         = local.runtime
+  public_crl                      = var.public_crl
+  sns_topic_arn                   = module.sns_ca_notifications.sns_topic_arn
+  xray_enabled                    = var.xray_enabled
+  artifact                        = var.lambda_artifacts["create_issuing_ca"]
+  retention_in_days               = var.log_retention_in_days
+  memory_size                     = var.memory_size
+  timeout                         = var.timeout
+  tags                            = merge(var.tags, var.additional_lambda_tags)
+}
+
+module "rsa_root_ca_crl_lambda" {
+  # Lambda function to publish Root CA CRL signed by Root CA KMS private key
+  source = "./modules/terraform-aws-ca-lambda"
+
+  project                         = var.project
+  env                             = var.env
+  prod_envs                       = var.prod_envs
+  function_name                   = local.root_ca_crl_function_name
+  description                     = "Publish Root CA certificate revocation list signed by KMS private key"
+  expiry_reminders                = var.expiry_reminders
+  external_s3_bucket              = module.external_s3.s3_bucket_name
+  internal_s3_bucket              = module.internal_s3.s3_bucket_name
+  logging_account_id              = var.logging_account_id
+  subscription_filter_destination = var.subscription_filter_destination
+  filter_pattern                  = var.filter_pattern
+  root_ca_info                    = var.root_ca_info
+  root_crl_days                   = var.root_crl_days
+  root_crl_seconds                = var.root_crl_seconds
+  lambda_role_arn                 = module.root_crl_iam.lambda_role_arn
+  domain                          = var.hosted_zone_domain
+  runtime                         = local.runtime
+  public_crl                      = var.public_crl
+  sns_topic_arn                   = module.sns_ca_notifications.sns_topic_arn
+  xray_enabled                    = var.xray_enabled
+  artifact                        = var.lambda_artifacts["root_ca_crl"]
+  retention_in_days               = var.log_retention_in_days
+  memory_size                     = var.memory_size
+  timeout                         = var.timeout
+  tags                            = merge(var.tags, var.additional_lambda_tags)
+}
+
+module "rsa_issuing_ca_crl_lambda" {
+  # Lambda function to publish Issuing CA CRL signed by Issuing CA KMS private key
+  source = "./modules/terraform-aws-ca-lambda"
+
+  project                         = var.project
+  env                             = var.env
+  prod_envs                       = var.prod_envs
+  function_name                   = local.issuing_ca_crl_function_name
+  description                     = "Publish Issuing CA certificate revocation list signed by KMS private key"
+  expiry_reminders                = var.expiry_reminders
+  external_s3_bucket              = module.external_s3.s3_bucket_name
+  internal_s3_bucket              = module.internal_s3.s3_bucket_name
+  logging_account_id              = var.logging_account_id
+  subscription_filter_destination = var.subscription_filter_destination
+  filter_pattern                  = var.filter_pattern
+  issuing_ca_info                 = var.issuing_ca_info
+  issuing_crl_days                = var.issuing_crl_days
+  issuing_crl_seconds             = var.issuing_crl_seconds
+  lambda_role_arn                 = module.issuing_crl_iam.lambda_role_arn
+  domain                          = var.hosted_zone_domain
+  runtime                         = local.runtime
+  public_crl                      = var.public_crl
+  sns_topic_arn                   = module.sns_ca_notifications.sns_topic_arn
+  xray_enabled                    = var.xray_enabled
+  artifact                        = var.lambda_artifacts["issuing_ca_crl"]
+  retention_in_days               = var.log_retention_in_days
+  memory_size                     = var.memory_size
+  timeout                         = var.timeout
+  tags                            = merge(var.tags, var.additional_lambda_tags)
+}
+
+module "rsa_tls_cert_lambda" {
+  # Lambda function to issue TLS certificates signed by Issuing CA KMS private key
+  source = "./modules/terraform-aws-ca-lambda"
+
+  project                         = var.project
+  env                             = var.env
+  prod_envs                       = var.prod_envs
+  function_name                   = local.tls_cert_function_name
+  description                     = "Issue TLS certificates signed by KMS private key"
+  expiry_reminders                = var.expiry_reminders
+  external_s3_bucket              = module.external_s3.s3_bucket_name
+  internal_s3_bucket              = module.internal_s3.s3_bucket_name
+  logging_account_id              = var.logging_account_id
+  subscription_filter_destination = var.subscription_filter_destination
+  filter_pattern                  = var.filter_pattern
+  issuing_ca_info                 = var.issuing_ca_info
+  lambda_role_arn                 = module.tls_keygen_iam.lambda_role_arn
+  domain                          = var.hosted_zone_domain
+  runtime                         = local.runtime
+  public_crl                      = var.public_crl
+  max_cert_lifetime               = var.max_cert_lifetime
+  custom_extension_allowlist      = var.custom_extension_allowlist
+  allowed_invocation_principals   = var.tls_invocation_principal_arns
+  sns_topic_arn                   = module.sns_ca_notifications.sns_topic_arn
+  xray_enabled                    = var.xray_enabled
+  artifact                        = var.lambda_artifacts["tls_cert"]
+  retention_in_days               = var.log_retention_in_days
+  memory_size                     = var.memory_size
+  timeout                         = var.timeout
+  tags                            = merge(var.tags, var.additional_lambda_tags)
+}
+
+module "expiry_lambda" {
+  # Lambda function to check for expiring GitOps certificates and send notifications to SNS
+  source = "./modules/terraform-aws-ca-lambda"
+  count  = length(var.expiry_reminders) > 0 && contains(var.cert_info_files, "tls") ? 1 : 0
+
+  project                         = var.project
+  env                             = var.env
+  prod_envs                       = var.prod_envs
+  function_name                   = local.expiry_function_name
+  description                     = "Check for expiring GitOps certificates and send notifications to SNS topic"
+  expiry_reminders                = var.expiry_reminders
+  external_s3_bucket              = module.external_s3.s3_bucket_name
+  internal_s3_bucket              = module.internal_s3.s3_bucket_name
+  logging_account_id              = var.logging_account_id
+  subscription_filter_destination = var.subscription_filter_destination
+  filter_pattern                  = var.filter_pattern
+  issuing_ca_info                 = var.issuing_ca_info
+  lambda_role_arn                 = module.expiry_iam[0].lambda_role_arn
+  domain                          = var.hosted_zone_domain
+  runtime                         = local.runtime
+  public_crl                      = var.public_crl
+  sns_topic_arn                   = module.sns_ca_notifications.sns_topic_arn
+  xray_enabled                    = var.xray_enabled
+  artifact                        = var.lambda_artifacts["expiry"]
+  retention_in_days               = var.log_retention_in_days
+  memory_size                     = var.memory_size
+  timeout                         = var.timeout
+  tags                            = merge(var.tags, var.additional_lambda_tags)
+}
+
+module "cloudfront_certificate" {
+  source = "./modules/terraform-aws-ca-acm"
+  count  = var.public_crl ? 1 : 0
+
+  domain_name = var.hosted_zone_domain
+  zone_id     = var.hosted_zone_id
+  tags        = var.tags
+}
+
+module "ca_cloudfront" {
+  # CloudFront distribution for CRL and CA certificate publication
+  source = "./modules/terraform-aws-ca-cloudfront"
+  count  = var.public_crl ? 1 : 0
+
+  project                     = var.project
+  base_domain                 = var.hosted_zone_domain
+  bucket_name                 = module.external_s3.s3_bucket_name
+  bucket_regional_domain_name = module.external_s3.s3_bucket_regional_domain_name
+  certificate_arn             = module.cloudfront_certificate[0].certificate_arn
+  environment                 = var.env
+  zone_id                     = var.hosted_zone_id
+  web_acl_id                  = var.cloudfront_web_acl_id
+  tags                        = var.tags
+
+  geo_restricted_locations = var.cloudfront_geo_restricted_locations
+  minimum_protocol_version = var.cloudfront_minimum_protocol_version
+}
+
+module "step-function-role" {
+  # IAM role and policy for step function to orchestrate Lambda functions
+  source = "./modules/terraform-aws-ca-iam"
+
+  project                = var.project
+  env                    = var.env
+  function_name          = "ca"
+  kms_arn_resource       = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  kms_arn_tls_keygen     = module.kms_tls_keygen.kms_arn
+  ddb_table_arn          = module.dynamodb.ddb_table_arn
+  policy                 = "state"
+  assume_role_policy     = "state"
+  external_s3_bucket_arn = module.external_s3.s3_bucket_arn
+  internal_s3_bucket_arn = module.internal_s3.s3_bucket_arn
+  tags                   = var.tags
+}
+
+module "step-function" {
+  # step function to orchestrate Lambda functions
+  source = "./modules/terraform-aws-ca-step-function"
+
+  project            = var.project
+  env                = var.env
+  role_arn           = module.step-function-role.lambda_role_arn
+  kms_arn            = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  internal_s3_bucket = module.internal_s3.s3_bucket_name
+  cert_info_files    = var.cert_info_files
+  expiry_reminders   = var.expiry_reminders
+  retention_in_days  = var.log_retention_in_days
+  tags               = var.tags
+}
+
+module "scheduler-role" {
+  # IAM role and policy for scheduler
+  source = "./modules/terraform-aws-ca-iam"
+
+  project            = var.project
+  env                = var.env
+  function_name      = "scheduler"
+  kms_arn_resource   = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  ddb_table_arn      = module.dynamodb.ddb_table_arn
+  policy             = "scheduler"
+  assume_role_policy = "scheduler"
+  tags               = var.tags
+}
+
+module "scheduler" {
+  # triggers step function once per day by default
+  source = "./modules/terraform-aws-ca-scheduler"
+
+  project             = var.project
+  env                 = var.env
+  role_arn            = module.scheduler-role.lambda_role_arn
+  target_arn          = module.step-function.state_machine_arn
+  schedule_expression = var.schedule_expression
+}
+
+module "db-reader-role" {
+  # IAM role and policy for DynamoDB reader from other AWS account
+  source = "./modules/terraform-aws-ca-iam"
+  count  = length(var.database_reader_principal_arns) > 0 ? 1 : 0
+
+  project            = var.project
+  env                = var.env
+  function_name      = "db-reader"
+  aws_principals     = var.database_reader_principal_arns
+  kms_arn_resource   = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  ddb_table_arn      = module.dynamodb.ddb_table_arn
+  policy             = "db_reader"
+  assume_role_policy = "db_reader"
+  tags               = var.tags
+}
+
+module "sns_ca_notifications" {
+  source = "./modules/terraform-aws-ca-sns"
+
+  project                       = var.project
+  function                      = "ca-notifications"
+  env                           = var.env
+  custom_sns_topic_display_name = var.custom_sns_topic_display_name
+  custom_sns_topic_name         = var.custom_sns_topic_name
+  kms_key_arn                   = coalesce(var.kms_arn_resource, module.kms_tls_keygen.kms_arn)
+  email_subscriptions           = var.sns_email_subscriptions
+  lambda_subscriptions = merge(
+    var.sns_lambda_subscriptions,
+    length(var.slack_channels) > 0 ? { notify = module.notify_lambda[0].lambda_arn } : {}
+  )
+  sqs_subscriptions   = var.sns_sqs_subscriptions
+  sns_policy          = var.sns_policy
+  sns_policy_template = var.sns_policy_template
+  workload_account_id = var.workload_account_id
+  tags                = var.tags
+}
+
+module "slack_secret" {
+  source = "./modules/terraform-aws-ca-secret"
+  count  = length(var.slack_channels) > 0 ? 1 : 0
+
+  project                 = var.project
+  env                     = var.env
+  purpose                 = "slack-token"
+  description             = "OAuth token for Slack app"
+  kms_key_id              = coalesce(var.kms_arn_resource, module.kms_tls_keygen.kms_arn)
+  ignore_value_changes    = var.slack_token == "" ? true : false
+  value                   = var.slack_token == "" ? "dummy-value" : var.slack_token
+  recovery_window_in_days = var.secret_recovery_window_in_days
+  tags                    = var.tags
+}
+
+module "notify_slack_iam" {
+  source = "./modules/terraform-aws-ca-iam"
+  count  = length(var.slack_channels) > 0 ? 1 : 0
+
+  project              = var.project
+  env                  = var.env
+  function_name        = "slack"
+  lambda_function_name = local.notify_function_name
+  policy               = "slack"
+  kms_arn_resource     = var.kms_arn_resource == "" ? module.kms_tls_keygen.kms_arn : var.kms_arn_resource
+  secret_arn           = module.slack_secret[0].secret_arn
+  tags                 = var.tags
+}
+
+module "notify_lambda" {
+  # Lambda function which subscribes to SNS and sends Slack notifications
+  source = "./modules/terraform-aws-ca-lambda"
+  count  = length(var.slack_channels) > 0 ? 1 : 0
+
+  project                         = var.project
+  env                             = var.env
+  prod_envs                       = var.prod_envs
+  function_name                   = local.notify_function_name
+  description                     = "Subscribe to SNS topic and send Slack notifications"
+  logging_account_id              = var.logging_account_id
+  subscription_filter_destination = var.subscription_filter_destination
+  filter_pattern                  = var.filter_pattern
+  lambda_role_arn                 = module.notify_slack_iam[0].lambda_role_arn
+  runtime                         = local.runtime
+  allowed_invocation_principals   = ["sns.amazonaws.com"]
+  slack_channels                  = var.slack_channels
+  slack_bad_emoji                 = var.slack_bad_emoji
+  slack_good_emoji                = var.slack_good_emoji
+  slack_secret_arn                = module.slack_secret[0].secret_arn
+  slack_username                  = var.slack_username
+  slack_warning_emoji             = var.slack_warning_emoji
+  xray_enabled                    = var.xray_enabled
+  artifact                        = var.lambda_artifacts["notify"]
+  retention_in_days               = var.log_retention_in_days
+  memory_size                     = var.memory_size
+  timeout                         = var.timeout
+  tags                            = merge(var.tags, var.additional_lambda_tags)
+}

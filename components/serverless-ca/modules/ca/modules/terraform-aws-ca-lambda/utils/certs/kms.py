@@ -1,0 +1,35 @@
+import boto3
+
+
+def kms_generate_key_pair(key_id, key_pair_spec="ECC_NIST_P256"):
+    client = boto3.client(service_name="kms")
+
+    return client.generate_data_key_pair(
+        KeyId=key_id,
+        KeyPairSpec=key_pair_spec,
+    )
+
+
+def kms_get_kms_key_id(alias):
+    """returns the KMS Key ID for a specified alias"""
+    client = boto3.client(service_name="kms")
+
+    alias_name = f"alias/{alias}"
+    response = client.describe_key(KeyId=alias_name)
+    return response["KeyMetadata"]["KeyId"]
+
+
+def kms_describe_key(kms_key_id):
+    """returns details of a KMS key"""
+    client = boto3.client(service_name="kms")
+
+    return client.describe_key(KeyId=kms_key_id)["KeyMetadata"]
+
+
+def kms_get_public_key(kms_key_id):
+    """returns cipher and public key of an asymmetric KMS key"""
+    client = boto3.client(service_name="kms")
+
+    response = client.get_public_key(KeyId=kms_key_id)
+
+    return response["PublicKey"]
