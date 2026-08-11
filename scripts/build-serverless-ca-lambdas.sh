@@ -26,6 +26,12 @@ for function_name in "${functions[@]}"; do
     --env "FUNCTION_NAME=$function_name" \
     --env AWS_DEFAULT_REGION=ap-southeast-2 \
     --env AWS_EC2_METADATA_DISABLED=true \
+    --env SLACK_SECRET_ARN=arn:aws:secretsmanager:ap-southeast-2:111111111111:secret:smoke \
+    --env SLACK_CHANNELS=smoke \
+    --env SLACK_BAD_EMOJI=:x: \
+    --env SLACK_GOOD_EMOJI=:white_check_mark: \
+    --env SLACK_USERNAME=Serverless-CA-Smoke \
+    --env SLACK_WARNING_EMOJI=:warning: \
     --volume "$source_root:/src:ro" \
     --volume "$output_dir:/out" \
     "$image" \
