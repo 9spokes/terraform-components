@@ -7,6 +7,7 @@ resource "aws_scheduler_schedule" "schedule" {
   }
 
   schedule_expression = var.schedule_expression
+  state               = var.scheduler_enabled ? "ENABLED" : "DISABLED"
 
   target {
     arn      = var.target_arn

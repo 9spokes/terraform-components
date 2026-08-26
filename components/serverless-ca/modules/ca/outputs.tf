@@ -91,8 +91,9 @@ output "state_machine" {
 
 output "scheduler" {
   value = {
-    name = module.scheduler.schedule_name
-    arn  = module.scheduler.schedule_arn
+    name  = module.scheduler.schedule_name
+    arn   = module.scheduler.schedule_arn
+    state = module.scheduler.schedule_state
   }
 }
 

@@ -30,6 +30,7 @@ from dataclasses_json import dataclass_json, LetterCase, Undefined
 from typing import Optional, Union
 
 # TODO: Request and Response classes use different naming convention
+INVALID_CSR_SIGNATURE_ERROR = "CSR signature is invalid"
 
 
 @dataclass_json(undefined=Undefined.EXCLUDE)
@@ -358,6 +359,11 @@ def lambda_handler(event, context):  # pylint:disable=unused-argument,too-many-l
     else:
         last_modified = None
         csr = load_pem_x509_csr(base64.standard_b64decode(request.base64_csr_data))
+
+    if not csr.is_signature_valid:
+        print("Certificate request rejected, CSR signature is invalid")
+        sns_notify_csr_rejected(csr_info, csr, INVALID_CSR_SIGNATURE_ERROR, sns_topic_arn)
+        return {"error": INVALID_CSR_SIGNATURE_ERROR}
 
     if certificate_already_issued(csr, csr_info.subject, last_modified, project, env_name, request.force_issue):
         return {"error": "Certificate already issued"}

@@ -28,6 +28,7 @@ module "ca" {
   issuing_crl_seconds   = var.crl_clock_skew_seconds
   expiry_reminders      = var.expiry_reminder_days
   schedule_expression   = var.schedule_expression
+  scheduler_enabled     = var.scheduler_enabled
   log_retention_in_days = var.log_retention_in_days
   memory_size           = var.lambda_memory_size
   timeout               = var.lambda_timeout

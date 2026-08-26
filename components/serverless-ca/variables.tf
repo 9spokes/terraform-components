@@ -112,6 +112,12 @@ variable "schedule_expression" {
   default     = "cron(15 8 * * ? *)"
 }
 
+variable "scheduler_enabled" {
+  type        = bool
+  description = "Enable scheduled GitOps issuance only after operator CA initialization and verification"
+  default     = false
+}
+
 variable "max_certificate_lifetime_days" {
   type        = number
   description = "Maximum end-entity certificate lifetime"

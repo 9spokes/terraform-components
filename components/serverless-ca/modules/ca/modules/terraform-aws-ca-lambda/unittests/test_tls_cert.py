@@ -1,6 +1,10 @@
+import base64
+import io
 from unittest.mock import patch
+
+import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography import x509 as crypto_x509
 from cryptography.x509.oid import NameOID
 
@@ -11,6 +15,7 @@ from lambda_code.tls_cert.tls_cert import (
     CaChainResponse,
     CertificateResponse,
     Request,
+    lambda_handler,
 )
 
 
@@ -226,6 +231,54 @@ def _generate_csr(common_name, organization=None):
         .sign(private_key, hashes.SHA256())
     )
     return csr
+
+
+def _generate_invalid_csr_pem(common_name):
+    """Produce a parsed CSR with a deliberately invalid signature."""
+    csr = _generate_csr(common_name)
+    der = bytearray(csr.public_bytes(serialization.Encoding.DER))
+    der[-1] ^= 1
+    invalid_csr = crypto_x509.load_der_x509_csr(bytes(der))
+    assert not invalid_csr.is_signature_valid
+    return invalid_csr.public_bytes(serialization.Encoding.PEM)
+
+
+@pytest.mark.parametrize("input_source", ["inline", "s3"])
+def test_invalid_csr_is_rejected_before_dynamodb_or_signing(monkeypatch, input_source):
+    """Both accepted CSR transports enforce proof of possession before issuance work."""
+    monkeypatch.setenv("PROJECT", "example-ca")
+    monkeypatch.setenv("ENVIRONMENT_NAME", "test")
+    monkeypatch.setenv("EXTERNAL_S3_BUCKET", "external")
+    monkeypatch.setenv("INTERNAL_S3_BUCKET", "internal")
+    monkeypatch.setenv("MAX_CERT_LIFETIME", "365")
+    monkeypatch.setenv("SNS_TOPIC_ARN", "arn:aws:sns:ap-southeast-2:111111111111:ca")
+
+    invalid_csr_pem = _generate_invalid_csr_pem("csr.example.com")
+    event = {"common_name": "authorised.example.com"}
+    if input_source == "inline":
+        event["base64_csr_data"] = base64.b64encode(invalid_csr_pem).decode("utf-8")
+    else:
+        event["csr_file"] = "request.csr"
+
+    with (
+        patch("lambda_code.tls_cert.tls_cert.create_ca_chain_response") as mock_ca_chain,
+        patch("lambda_code.tls_cert.tls_cert.s3_download") as mock_s3_download,
+        patch("lambda_code.tls_cert.tls_cert.sns_notify_csr_rejected") as mock_rejected,
+        patch("lambda_code.tls_cert.tls_cert.certificate_already_issued") as mock_already_issued,
+        patch("lambda_code.tls_cert.tls_cert.db_issue_certificate") as mock_db_issue,
+        patch("lambda_code.tls_cert.tls_cert.sign_csr") as mock_sign,
+    ):
+        if input_source == "s3":
+            mock_s3_download.return_value = {"LastModified": object(), "Body": io.BytesIO(invalid_csr_pem)}
+
+        response = lambda_handler(event, None)
+
+    assert response == {"error": "CSR signature is invalid"}
+    mock_rejected.assert_called_once()
+    assert mock_rejected.call_args.args[2] == "CSR signature is invalid"
+    mock_already_issued.assert_not_called()
+    mock_db_issue.assert_not_called()
+    mock_sign.assert_not_called()
 
 
 @patch("lambda_code.tls_cert.tls_cert.publish_to_sns")
