@@ -11,13 +11,15 @@ The component is Class 3: its inputs, packaging, and AWS resource model are reus
 - The first component API is private-only. Public CRL/CloudFront and embedded Slack or SNS consumers remain internal upstream capabilities and are not exposed.
 - Direct issuance, database reads, and publication-bucket reads have independent principal lists.
 - Terraform seeds the three GitOps manifests once and ignores later content changes.
-- CA creation is not CA initialization. Invoke and verify initialization through an explicit operator procedure after deployment.
+- CA creation is not CA initialization. The Scheduler is disabled on the first apply; an operator must invoke and verify initialization explicitly.
 
 ## Deployment order
 
 1. Create the regional, versioned artifact bucket and the narrowly scoped publisher role in the chosen CA account.
 2. Promote packages from a protected GitHub release into the approved bucket prefix and record each S3 version ID.
 3. Configure and deploy this component with those immutable artifact coordinates.
-4. Run explicit operator initialization, then verify the root/issuing certificates, CA bundle, and both CRLs before adding consumers.
+4. Keep `scheduler_enabled = false` on the first apply. An operator invokes the deployed Step Functions state machine (for example with `modules/ca/scripts/start_ca_step_function.py`) to initialize the CA.
+5. Verify the root certificate, issuing certificate, CA bundle, root CRL, and issuing CRL at the `certificate_locations` output before adding consumers.
+6. Set `scheduler_enabled = true` and apply again only after those checks succeed.
 
 Do not combine these stages or initialize the CA from Terraform.

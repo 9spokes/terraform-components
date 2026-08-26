@@ -355,6 +355,12 @@ variable "schedule_expression" {
   default     = "cron(15 8 * * ? *)" # 8.15 a.m. daily
 }
 
+variable "scheduler_enabled" {
+  type        = bool
+  description = "Enable the Scheduler only after operator CA initialization and verification"
+  default     = false
+}
+
 variable "slack_bad_emoji" {
   description = "Slack emoji for bad events"
   default     = ":octagonal_sign:"

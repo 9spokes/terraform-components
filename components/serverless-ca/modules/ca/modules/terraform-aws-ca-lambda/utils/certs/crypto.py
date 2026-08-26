@@ -233,10 +233,18 @@ def crypto_revoked_certificate(serial_number, revocation_date):
 
 def crypto_tls_ca_cert_signing_request(private_key, common_name):
     """CA certificate signing request created using private key"""
+    hash_class = {
+        "sha256": hashes.SHA256,
+        "sha384": hashes.SHA384,
+        "sha512": hashes.SHA512,
+    }.get(getattr(private_key, "hash_algorithm", "sha256"))
+    if hash_class is None:
+        raise ValueError("Unsupported key hash algorithm")
+
     csr = (
         x509.CertificateSigningRequestBuilder()
         .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)]))
-        .sign(private_key, hashes.SHA256())
+        .sign(private_key, hash_class())
     )
 
     return csr.public_bytes(serialization.Encoding.PEM)

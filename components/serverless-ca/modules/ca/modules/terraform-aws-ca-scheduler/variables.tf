@@ -23,6 +23,12 @@ variable "schedule_expression" {
   description = "Schedule in supported format"
 }
 
+variable "scheduler_enabled" {
+  description = "Whether the Scheduler may invoke its target"
+  type        = bool
+  default     = false
+}
+
 variable "group_name" {
   description = "EventBridge Group name"
   default     = "default"

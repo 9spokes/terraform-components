@@ -479,6 +479,7 @@ module "scheduler" {
   role_arn            = module.scheduler-role.lambda_role_arn
   target_arn          = module.step-function.state_machine_arn
   schedule_expression = var.schedule_expression
+  scheduler_enabled   = var.scheduler_enabled
 }
 
 module "db-reader-role" {

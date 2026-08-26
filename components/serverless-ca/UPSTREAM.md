@@ -39,5 +39,8 @@ The upstream documentation website, images, examples, repository automation, and
 16. Scope Step Functions and Scheduler permissions to the exact CA functions/state machine and remove unused S3 object deletion from Lambda roles.
 17. Constrain the adapted module itself to OpenTofu 1.12.4 and AWS provider 6.x, tag optional ACM/CloudFront resources, and require HTTPS for the retained public-CRL path.
 18. Point Step Functions, SNS, outputs, and direct invoke permissions at a `live` alias backed by a published immutable Lambda version instead of mutable `$LATEST`.
+19. Create the Scheduler in `DISABLED` state by default. Operators explicitly initialize and verify the CA before setting `scheduler_enabled = true` in a later apply.
+20. Reject parsed CSRs with an invalid signature before duplicate-key registration or signing, while preserving the upstream request subject and SAN override contract.
+21. Preserve the selected ECDSA signing hash in generated CSRs and KMS signing calls without mutating cryptography caller objects.
 
 When updating the snapshot, review upstream changes path-by-path and update this ledger. Do not overwrite the adapted files with an unreviewed bulk copy.

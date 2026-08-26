@@ -127,4 +127,22 @@ run "private_hardened_defaults" {
     ])
     error_message = "Each function must receive its exact immutable artifact."
   }
+
+  assert {
+    condition     = output.scheduler.state == "DISABLED"
+    error_message = "The scheduler must be disabled until an operator initializes and verifies the CA."
+  }
+}
+
+run "scheduler_can_be_explicitly_enabled" {
+  command = plan
+
+  variables {
+    scheduler_enabled = true
+  }
+
+  assert {
+    condition     = output.scheduler.state == "ENABLED"
+    error_message = "The scheduler must enable only when scheduler_enabled is explicitly true."
+  }
 }

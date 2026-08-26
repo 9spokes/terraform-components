@@ -56,11 +56,16 @@ class AWSKMSEllipticCurvePrivateKey(ec.EllipticCurvePrivateKey):
         signature_algorithm: ec.EllipticCurveSignatureAlgorithm,
     ) -> bytes:
         # Send data to AWS KMS to be signed
-        signature_algorithm.name = self.hash_algorithm
+        supplied_hash_algorithm = signature_algorithm.algorithm.name
+        if supplied_hash_algorithm != self.hash_algorithm:
+            raise ValueError(
+                f"Configured hash algorithm {self.hash_algorithm} does not match supplied hash algorithm "
+                f"{supplied_hash_algorithm}"
+            )
         try:
-            sig_alg_str = self.signature_algorithm_lookup[signature_algorithm.name]
+            sig_alg_str = self.signature_algorithm_lookup[self.hash_algorithm]
         except KeyError as exc:
-            raise NotImplementedError(f"Unknown Signature Algorithm: {format(signature_algorithm.name)}") from exc
+            raise NotImplementedError(f"Unknown Signature Algorithm: {format(self.hash_algorithm)}") from exc
         client = boto3.client("kms")
         # KMS Sign limits a RAW message to 4096 bytes, so hash locally and sign
         # the fixed-size digest (MessageType=DIGEST) to support larger payloads
@@ -162,17 +167,21 @@ class AWSKMSRSAPrivateKey(rsa.RSAPrivateKey):
         return AWSKMSRSAPublicKey(self.keyid)
 
     def sign(self, data: bytes, padding: rsa.AsymmetricPadding, algorithm: hashes.HashAlgorithm) -> bytes:
-        algorithm.name = "sha256"
-
+        supplied_hash_algorithm = algorithm.name
+        if supplied_hash_algorithm != self.hash_algorithm:
+            raise ValueError(
+                f"Configured hash algorithm {self.hash_algorithm} does not match supplied hash algorithm "
+                f"{supplied_hash_algorithm}"
+            )
         try:
-            sig_alg_str = self.signature_algorithm_lookup[algorithm.name]
+            sig_alg_str = self.signature_algorithm_lookup[self.hash_algorithm]
         except KeyError as exc:
-            raise NotImplementedError(f"Unknown Signature Algorithm: {format(algorithm.name)}") from exc
+            raise NotImplementedError(f"Unknown Signature Algorithm: {format(self.hash_algorithm)}") from exc
         client = boto3.client("kms")
         # KMS Sign limits a RAW message to 4096 bytes, so hash locally and sign
         # the fixed-size digest (MessageType=DIGEST) to support larger payloads
         # such as CRLs with many revoked certificates (issue #606).
-        digest = hashlib.new(algorithm.name, data).digest()
+        digest = hashlib.new(self.hash_algorithm, data).digest()
         sign_response = client.sign(
             KeyId=self.keyid, SigningAlgorithm=sig_alg_str, Message=digest, MessageType="DIGEST"
         )
