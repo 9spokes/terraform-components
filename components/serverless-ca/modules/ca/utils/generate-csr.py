@@ -30,7 +30,7 @@ def parse_arguments():
         "--destination",
         type=str,
         default=os.path.expanduser("~") + "/certs",
-        help="Path to destination directory for output files (default: ~/.certs)",
+        help="Path to destination directory for output files (default: ~/certs)",
     )
     return parser.parse_args()
 

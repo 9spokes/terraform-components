@@ -16,6 +16,12 @@ def main() -> None:
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
 
+    release_tag = os.environ.get("RELEASE_TAG")
+    release_commit = os.environ.get("RELEASE_COMMIT")
+    missing = [name for name, value in (("RELEASE_TAG", release_tag), ("RELEASE_COMMIT", release_commit)) if not value]
+    if missing:
+        raise SystemExit(f"Missing required release metadata: {', '.join(missing)}")
+
     subjects = []
     for path in sorted(args.artifact_directory.iterdir()):
         if not path.is_file() or path == args.output or path.name == "SHA256SUMS":
@@ -34,11 +40,11 @@ def main() -> None:
         "predicate": {
             "buildDefinition": {
                 "buildType": "https://github.com/9spokes/terraform-components/.github/workflows/release.yml",
-                "externalParameters": {"tag": os.environ["RELEASE_TAG"]},
+                "externalParameters": {"tag": release_tag},
                 "resolvedDependencies": [
                     {
                         "uri": "git+https://github.com/9spokes/terraform-components",
-                        "digest": {"gitCommit": os.environ["RELEASE_COMMIT"]},
+                        "digest": {"gitCommit": release_commit},
                     }
                 ],
             },
