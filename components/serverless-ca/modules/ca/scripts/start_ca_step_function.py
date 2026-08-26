@@ -35,7 +35,7 @@ def monitor_step_function_execution(execution_arn):
 
     while execution_details["status"] == "RUNNING":
         execution_details = stepfunctions_client.describe_execution(executionArn=execution_arn)
-        print(f'"CA Step Function status: {execution_details["status"]}')
+        print(f"CA Step Function status: {execution_details['status']}")
         sleep(5)
 
     return execution_details
