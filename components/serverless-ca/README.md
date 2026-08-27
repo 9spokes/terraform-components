@@ -7,6 +7,8 @@ The component is Class 3: its inputs, packaging, and AWS resource model are reus
 ## Security and operations model
 
 - Terraform never builds Lambda code. Supply all seven functions as immutable, versioned S3 objects.
+- Choose `lambda_architecture = "x86_64"` (the compatibility default) or `"arm64"`. Every artifact records its architecture and must match the selected runtime.
+- Release assets are named `<function>-x86_64.zip` and `<function>-arm64.zip`; promote only the seven files matching the selected runtime.
 - `sha256` values use the base64-encoded SHA-256 representation expected by `aws_lambda_function.source_code_hash`.
 - The first component API is private-only. Public CRL/CloudFront and embedded Slack or SNS consumers remain internal upstream capabilities and are not exposed.
 - Direct issuance, database reads, and publication-bucket reads have independent principal lists.
@@ -16,7 +18,7 @@ The component is Class 3: its inputs, packaging, and AWS resource model are reus
 ## Deployment order
 
 1. Create the regional, versioned artifact bucket and the narrowly scoped publisher role in the chosen CA account.
-2. Promote packages from a protected GitHub release into the approved bucket prefix and record each S3 version ID.
+2. Promote the seven architecture-qualified packages for the selected runtime from a protected GitHub release into the approved bucket prefix and record each S3 version ID.
 3. Configure and deploy this component with those immutable artifact coordinates.
 4. Keep `scheduler_enabled = false` on the first apply. An operator invokes the deployed Step Functions state machine (for example with `modules/ca/scripts/start_ca_step_function.py`) to initialize the CA.
 5. Verify the root certificate, issuing certificate, CA bundle, root CRL, and issuing CRL at the `certificate_locations` output before adding consumers.

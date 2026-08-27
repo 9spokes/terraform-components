@@ -233,6 +233,7 @@ module "create_rsa_root_ca_lambda" {
   lambda_role_arn                 = module.create_root_ca_iam.lambda_role_arn
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
+  architecture                    = var.lambda_architecture
   public_crl                      = var.public_crl
   sns_topic_arn                   = module.sns_ca_notifications.sns_topic_arn
   xray_enabled                    = var.xray_enabled
@@ -262,6 +263,7 @@ module "create_rsa_issuing_ca_lambda" {
   lambda_role_arn                 = module.create_issuing_ca_iam.lambda_role_arn
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
+  architecture                    = var.lambda_architecture
   public_crl                      = var.public_crl
   sns_topic_arn                   = module.sns_ca_notifications.sns_topic_arn
   xray_enabled                    = var.xray_enabled
@@ -293,6 +295,7 @@ module "rsa_root_ca_crl_lambda" {
   lambda_role_arn                 = module.root_crl_iam.lambda_role_arn
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
+  architecture                    = var.lambda_architecture
   public_crl                      = var.public_crl
   sns_topic_arn                   = module.sns_ca_notifications.sns_topic_arn
   xray_enabled                    = var.xray_enabled
@@ -324,6 +327,7 @@ module "rsa_issuing_ca_crl_lambda" {
   lambda_role_arn                 = module.issuing_crl_iam.lambda_role_arn
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
+  architecture                    = var.lambda_architecture
   public_crl                      = var.public_crl
   sns_topic_arn                   = module.sns_ca_notifications.sns_topic_arn
   xray_enabled                    = var.xray_enabled
@@ -353,6 +357,7 @@ module "rsa_tls_cert_lambda" {
   lambda_role_arn                 = module.tls_keygen_iam.lambda_role_arn
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
+  architecture                    = var.lambda_architecture
   public_crl                      = var.public_crl
   max_cert_lifetime               = var.max_cert_lifetime
   custom_extension_allowlist      = var.custom_extension_allowlist
@@ -386,6 +391,7 @@ module "expiry_lambda" {
   lambda_role_arn                 = module.expiry_iam[0].lambda_role_arn
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
+  architecture                    = var.lambda_architecture
   public_crl                      = var.public_crl
   sns_topic_arn                   = module.sns_ca_notifications.sns_topic_arn
   xray_enabled                    = var.xray_enabled
@@ -563,6 +569,7 @@ module "notify_lambda" {
   filter_pattern                  = var.filter_pattern
   lambda_role_arn                 = module.notify_slack_iam[0].lambda_role_arn
   runtime                         = local.runtime
+  architecture                    = var.lambda_architecture
   allowed_invocation_principals   = ["sns.amazonaws.com"]
   slack_channels                  = var.slack_channels
   slack_bad_emoji                 = var.slack_bad_emoji

@@ -23,7 +23,7 @@ The upstream documentation website, images, examples, repository automation, and
 
 1. Removed Terraform `null_resource`, `local-exec`, virtualenv creation, local ZIP generation, and apply-time dependency installation.
 2. Require immutable S3 inputs for all seven Lambda packages: bucket, key, object version ID, and base64-encoded SHA-256 digest.
-3. Fix the Lambda runtime to Python 3.14 and architecture to x86_64.
+3. Fix the Lambda runtime to Python 3.14, explicitly support x86_64 and arm64, and require every immutable artifact to declare the selected architecture. Upstream implicitly used x86_64 through its ManyLinux packaging default and Lambda's default architecture.
 4. Split the original combined principal list into direct TLS invocation, DynamoDB reader, and external publication-bucket reader principals.
 5. Default S3 to non-destructive deletion, enabled versioning, full public-access blocking, and encryption for both internal and external buckets.
 6. Default DynamoDB deletion protection to enabled, KMS deletion windows to 30 days, and Lambda/Step Functions log retention to 365 days.

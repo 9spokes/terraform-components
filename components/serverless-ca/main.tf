@@ -17,6 +17,7 @@ module "ca" {
   issuing_ca_key_spec = var.issuing_ca_key_spec
 
   lambda_artifacts                      = var.lambda_artifacts
+  lambda_architecture                   = var.lambda_architecture
   tls_invocation_principal_arns         = var.tls_invocation_principal_arns
   database_reader_principal_arns        = var.database_reader_principal_arns
   external_bucket_reader_principal_arns = var.external_bucket_reader_principal_arns

@@ -53,10 +53,11 @@ variables {
 
   lambda_artifacts = {
     for name in ["create_root_ca", "create_issuing_ca", "root_ca_crl", "issuing_ca_crl", "tls_cert", "expiry", "notify"] : name => {
-      bucket     = "immutable-artifacts"
-      key        = "serverless-ca/${name}.zip"
-      version_id = "version-${name}"
-      sha256     = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      architecture = "x86_64"
+      bucket       = "immutable-artifacts"
+      key          = "serverless-ca/${name}.zip"
+      version_id   = "version-${name}"
+      sha256       = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
     }
   }
 
@@ -104,7 +105,7 @@ run "private_hardened_defaults" {
       output.deployment_contract.runtime.name == "python3.14" &&
       output.deployment_contract.runtime.architecture == "x86_64"
     )
-    error_message = "Runtime is fixed to Python 3.14 on x86_64."
+    error_message = "The default runtime must be Python 3.14 on x86_64."
   }
 
   assert {
@@ -131,6 +132,34 @@ run "private_hardened_defaults" {
   assert {
     condition     = output.scheduler.state == "DISABLED"
     error_message = "The scheduler must be disabled until an operator initializes and verifies the CA."
+  }
+}
+
+run "arm64_runtime_contract" {
+  command = plan
+
+  variables {
+    lambda_architecture = "arm64"
+    lambda_artifacts = {
+      for name in ["create_root_ca", "create_issuing_ca", "root_ca_crl", "issuing_ca_crl", "tls_cert", "expiry", "notify"] : name => {
+        architecture = "arm64"
+        bucket       = "immutable-artifacts"
+        key          = "serverless-ca/${name}-arm64.zip"
+        version_id   = "version-${name}-arm64"
+        sha256       = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      output.deployment_contract.runtime.name == "python3.14" &&
+      output.deployment_contract.runtime.architecture == "arm64" &&
+      alltrue([
+        for artifact in values(output.deployment_contract.artifacts) : artifact.architecture == "arm64"
+      ])
+    )
+    error_message = "The arm64 runtime must use architecture-matched immutable artifacts."
   }
 }
 

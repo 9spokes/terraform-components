@@ -18,7 +18,7 @@ output "deployment_contract" {
   value = {
     artifact                      = var.artifact
     runtime                       = var.runtime
-    architecture                  = "x86_64"
+    architecture                  = var.architecture
     retention_in_days             = var.retention_in_days
     allowed_invocation_principals = var.allowed_invocation_principals
   }

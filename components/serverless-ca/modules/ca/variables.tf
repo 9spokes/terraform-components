@@ -210,12 +210,13 @@ variable "logging_account_id" {
 }
 
 variable "lambda_artifacts" {
-  description = "Immutable, versioned S3 artifacts for all Serverless CA Lambda functions. sha256 is base64 encoded."
+  description = "Immutable, versioned S3 artifacts for all Serverless CA Lambda functions. architecture must match lambda_architecture and sha256 is base64 encoded."
   type = map(object({
-    bucket     = string
-    key        = string
-    version_id = string
-    sha256     = string
+    architecture = string
+    bucket       = string
+    key          = string
+    version_id   = string
+    sha256       = string
   }))
 
   validation {
@@ -228,13 +229,25 @@ variable "lambda_artifacts" {
   validation {
     condition = alltrue([
       for artifact in values(var.lambda_artifacts) : (
+        artifact.architecture == var.lambda_architecture &&
         artifact.bucket != "" &&
         artifact.key != "" &&
         artifact.version_id != "" &&
         can(regex("^[A-Za-z0-9+/]{43}=$", artifact.sha256))
       )
     ])
-    error_message = "Every Lambda artifact requires a bucket, key, S3 version ID, and base64-encoded SHA-256 digest."
+    error_message = "Every Lambda artifact must match lambda_architecture and requires a bucket, key, S3 version ID, and base64-encoded SHA-256 digest."
+  }
+}
+
+variable "lambda_architecture" {
+  type        = string
+  description = "Instruction set architecture for all Serverless CA Lambda functions and artifacts"
+  default     = "x86_64"
+
+  validation {
+    condition     = contains(["x86_64", "arm64"], var.lambda_architecture)
+    error_message = "lambda_architecture must be x86_64 or arm64."
   }
 }
 
