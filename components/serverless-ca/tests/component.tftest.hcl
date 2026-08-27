@@ -20,10 +20,11 @@ variables {
 
   lambda_artifacts = {
     for name in ["create_root_ca", "create_issuing_ca", "root_ca_crl", "issuing_ca_crl", "tls_cert", "expiry", "notify"] : name => {
-      bucket     = "immutable-artifacts"
-      key        = "serverless-ca/${name}.zip"
-      version_id = "version-${name}"
-      sha256     = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      architecture = "x86_64"
+      bucket       = "immutable-artifacts"
+      key          = "serverless-ca/${name}.zip"
+      version_id   = "version-${name}"
+      sha256       = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
     }
   }
 }

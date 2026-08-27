@@ -6,20 +6,32 @@ variable "allowed_invocation_principals" {
 variable "artifact" {
   description = "Immutable S3 artifact for this Lambda function. sha256 is the base64-encoded SHA-256 digest expected by AWS Lambda."
   type = object({
-    bucket     = string
-    key        = string
-    version_id = string
-    sha256     = string
+    architecture = string
+    bucket       = string
+    key          = string
+    version_id   = string
+    sha256       = string
   })
 
   validation {
     condition = (
+      var.artifact.architecture == var.architecture &&
       var.artifact.bucket != "" &&
       var.artifact.key != "" &&
       var.artifact.version_id != "" &&
       can(regex("^[A-Za-z0-9+/]{43}=$", var.artifact.sha256))
     )
-    error_message = "Lambda artifacts require a bucket, key, S3 version ID, and base64-encoded SHA-256 digest."
+    error_message = "The Lambda artifact architecture must match the function and requires a bucket, key, S3 version ID, and base64-encoded SHA-256 digest."
+  }
+}
+
+variable "architecture" {
+  type        = string
+  description = "Instruction set architecture for this Lambda function"
+
+  validation {
+    condition     = contains(["x86_64", "arm64"], var.architecture)
+    error_message = "architecture must be x86_64 or arm64."
   }
 }
 
@@ -102,11 +114,6 @@ variable "max_cert_lifetime" {
 variable "memory_size" {
   description = "Memory allocation for scanning Lambda functions"
   default     = 128
-}
-
-variable "platform" {
-  description = "ManyLinux platform version, needed to avoid glibc errors due to incompatible versions"
-  default     = "manylinux2014_x86_64"
 }
 
 variable "prod_envs" {

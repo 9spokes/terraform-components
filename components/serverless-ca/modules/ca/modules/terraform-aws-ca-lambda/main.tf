@@ -8,7 +8,7 @@ resource "aws_lambda_function" "lambda" {
   role              = var.lambda_role_arn
   handler           = "${local.file_name}.lambda_handler"
   runtime           = var.runtime
-  architectures     = ["x86_64"]
+  architectures     = [var.architecture]
   memory_size       = var.memory_size
   timeout           = var.timeout
   publish           = true
