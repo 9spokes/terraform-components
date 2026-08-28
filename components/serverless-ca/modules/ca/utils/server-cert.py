@@ -40,7 +40,7 @@ def create_session(profile):
 
 def parse_arguments():
     """
-    Read arguments and return arguments dictonary
+    Read arguments and return arguments dictionary
     """
 
     arguments = {}

@@ -21,6 +21,13 @@ resource "aws_lambda_function" "lambda" {
   tracing_config {
     mode = var.xray_enabled ? "Active" : "PassThrough"
   }
+
+  lifecycle {
+    postcondition {
+      condition     = self.code_sha256 == var.artifact.sha256
+      error_message = "AWS Lambda deployed code digest does not match the declared immutable artifact SHA-256 digest."
+    }
+  }
 }
 
 resource "aws_lambda_alias" "lambda" {

@@ -45,6 +45,12 @@ mock_provider "aws" {
       arn = "arn:aws:states:ap-southeast-2:111111111111:stateMachine:serverless-ca-test"
     }
   }
+
+  mock_resource "aws_lambda_function" {
+    defaults = {
+      code_sha256 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    }
+  }
 }
 
 variables {
@@ -132,6 +138,24 @@ run "private_hardened_defaults" {
   assert {
     condition     = output.scheduler.state == "DISABLED"
     error_message = "The scheduler must be disabled until an operator initializes and verifies the CA."
+  }
+
+  assert {
+    condition = alltrue([
+      length([
+        for statement in jsondecode(module.step-function-role.policy_document).Statement : statement
+        if statement.Sid == "StepFunction" &&
+        toset(statement.Action) == toset(["states:StartExecution"]) &&
+        statement.Resource == "arn:aws:states:ap-southeast-2:111111111111:stateMachine:example-ca-ca-test"
+      ]) == 1,
+      length([
+        for statement in jsondecode(module.step-function-role.policy_document).Statement : statement
+        if statement.Sid == "DescribeDistributedMapExecutions" &&
+        toset(statement.Action) == toset(["states:DescribeExecution"]) &&
+        statement.Resource == "arn:aws:states:ap-southeast-2:111111111111:execution:example-ca-ca-test:*"
+      ]) == 1,
+    ])
+    error_message = "Distributed Map execution permissions must retain exact start and describe action/resource scopes."
   }
 }
 

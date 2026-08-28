@@ -18,6 +18,31 @@ from .crypto import (
 from .types import Subject
 
 
+def certificate_not_valid_after_utc(certificate):
+    """Return an issuer expiry as an aware UTC datetime across cryptography versions."""
+    expires_at = getattr(certificate, "not_valid_after_utc", None)
+    if expires_at is None:
+        expires_at = certificate.not_valid_after.replace(tzinfo=timezone.utc)
+    elif expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    return expires_at.astimezone(timezone.utc)
+
+
+def validity_window(issuer_certificate, lifetime, not_valid_before, now):
+    """Return a validity window capped at the issuer certificate expiry."""
+    issuer_not_valid_after = certificate_not_valid_after_utc(issuer_certificate)
+    if issuer_not_valid_after <= now:
+        raise ValueError("Issuer certificate has expired")
+
+    requested_not_valid_after = now + timedelta(days=lifetime)
+    not_valid_after = min(requested_not_valid_after, issuer_not_valid_after)
+    if not_valid_after <= not_valid_before:
+        raise ValueError("Issuer certificate expires before the requested certificate can become valid")
+
+    return not_valid_after
+
+
 def ca_name(project, env_name, hierarchy):
     prod_envs_str = environ.get("PROD_ENVIRONMENTS")
     if prod_envs_str:
@@ -93,14 +118,18 @@ def ca_kms_sign_ca_certificate_request(
         ]
     )
 
+    now = datetime.now(timezone.utc)
+    not_valid_before = now
+    not_valid_after = validity_window(ca_cert, lifetime, not_valid_before, now)
+
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
         .issuer_name(ca_cert.subject)
         .public_key(csr_cert.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.now(timezone.utc))
-        .not_valid_after(datetime.now(timezone.utc) + timedelta(days=lifetime))
+        .not_valid_before(not_valid_before)
+        .not_valid_after(not_valid_after)
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(csr_cert.public_key()), critical=False)
         .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()), critical=False)
         .add_extension(
@@ -185,14 +214,18 @@ def ca_build_cert(csr_cert, ca_cert, lifetime, delta, cert_request_info):
             if oid not in extended_key_usage_oids:
                 extended_key_usage_oids.append(oid)
 
+    now = datetime.now(timezone.utc)
+    not_valid_before = now - delta
+    not_valid_after = validity_window(ca_cert, lifetime, not_valid_before, now)
+
     cert_builder = (
         x509.CertificateBuilder()
         .subject_name(x509_subject)
         .issuer_name(ca_cert.subject)
         .public_key(csr_cert.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before((datetime.now(timezone.utc)) - delta)
-        .not_valid_after((datetime.now(timezone.utc)) + timedelta(days=lifetime))
+        .not_valid_before(not_valid_before)
+        .not_valid_after(not_valid_after)
         .add_extension(
             x509.KeyUsage(
                 digital_signature=True,

@@ -12,7 +12,14 @@ def get_s3_bucket(bucket_purpose="internal", session=None):
         s3_client = session.client("s3")
 
     s3_buckets = s3_client.list_buckets()["Buckets"]
-    return [b["Name"] for b in s3_buckets if f"-{bucket_purpose}-" in b["Name"]][0]
+    matching_buckets = [b["Name"] for b in s3_buckets if f"-{bucket_purpose}-" in b["Name"]]
+    if not matching_buckets:
+        raise LookupError(
+            f"No S3 bucket name contains '-{bucket_purpose}-' "
+            f"(searched {len(s3_buckets)} bucket(s))"
+        )
+
+    return matching_buckets[0]
 
 
 def list_s3_object_keys(bucket_name, session=None):
@@ -27,7 +34,7 @@ def list_s3_object_keys(bucket_name, session=None):
 
     response = s3_client.list_objects_v2(Bucket=bucket_name)
 
-    s3_objects = response["Contents"]
+    s3_objects = response.get("Contents", [])
 
     return [s3_object["Key"] for s3_object in s3_objects]
 
