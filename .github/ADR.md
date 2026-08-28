@@ -13,9 +13,21 @@ attestations and `SHA256SUMS` before it acquires AWS credentials.
 
 The workflow writes immutable objects beneath
 `serverless-ca/releases/<tag>/` with conditional `PutObject` and SSE-S3. It
-writes `SHA256SUMS` last, so its presence is the completion marker. The role
-does not need S3 read, list, delete, tagging, ACL, retention, legal-hold, or
-governance-bypass permissions.
+writes the 18 checksummed release assets first and records each successful
+`PutObject` response in a deterministic `promotion-manifest.json`. Each entry
+maps the release filename and checksum to the exact S3 key, returned S3 version
+ID, content length, tag, source commit, repository, and workflow run. The
+manifest is generated only after the release attestations and checksums have
+been verified and after every asset upload has returned the version ID that the
+manifest records. It is promotion metadata, not a GitHub Release asset, so it
+is not part of the release allowlist or attestation loop.
+
+The manifest proves that this workflow received successful, versioned
+`PutObject` responses for the listed verified release inputs. It is not an
+independent S3 read-back, retention audit, or proof that a promotion completed.
+The workflow therefore uploads `SHA256SUMS` only after the manifest, and its
+presence remains the completion marker. The role does not need S3 read, list,
+delete, tagging, ACL, retention, legal-hold, or governance-bypass permissions.
 
 The promotion is not atomically retryable after any partial immutable upload:
 the role deliberately cannot inspect or remove partial objects and conditional
