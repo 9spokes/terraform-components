@@ -141,6 +141,17 @@ run "private_hardened_defaults" {
   }
 
   assert {
+    condition = alltrue(concat(
+      [
+        for name in ["create_rsa_root_ca_lambda", "create_rsa_issuing_ca_lambda", "rsa_root_ca_crl_lambda", "rsa_issuing_ca_crl_lambda", "rsa_tls_cert_lambda", "expiry_lambda"] :
+        output.deployment_contract.lambda_table_names[name] == output.dynamodb_table.name
+      ],
+      [output.dynamodb_table.name == "ExampleCaCATest"],
+    ))
+    error_message = "Every CA function must receive the exact DynamoDB table name Terraform created; derived names diverge for digit-leading projects."
+  }
+
+  assert {
     condition = alltrue([
       length([
         for statement in jsondecode(module.step-function-role.policy_document).Statement : statement
@@ -197,5 +208,26 @@ run "scheduler_can_be_explicitly_enabled" {
   assert {
     condition     = output.scheduler.state == "ENABLED"
     error_message = "The scheduler must enable only when scheduler_enabled is explicitly true."
+  }
+}
+
+run "digit_leading_project_receives_exact_table_name" {
+  command = plan
+
+  # The live 9spokes/internal-g1 deployment. Python str.title() would derive
+  # 9SpokesCAInternal-G1; Terraform creates 9spokesCAInternal-G1 and must hand
+  # that exact name to every CA function.
+  variables {
+    project = "9spokes"
+    env     = "internal-g1"
+  }
+
+  assert {
+    condition = alltrue(concat(
+      [output.dynamodb_table.name == "9spokesCAInternal-G1"],
+      [for name in values(output.deployment_contract.lambda_table_names) : name == "9spokesCAInternal-G1"],
+      [length(output.deployment_contract.lambda_table_names) == 6],
+    ))
+    error_message = "A digit-leading project must pass 9spokesCAInternal-G1, not a Python-derived 9SpokesCAInternal-G1, to all six CA functions."
   }
 }

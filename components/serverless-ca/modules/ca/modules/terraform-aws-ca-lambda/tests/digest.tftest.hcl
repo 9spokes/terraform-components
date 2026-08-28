@@ -38,12 +38,13 @@ variables {
     version_id   = "version-tls-cert"
     sha256       = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
   }
-  description     = "Issue TLS certificates"
-  env             = "test"
-  filter_pattern  = ""
-  function_name   = "tls-cert"
-  lambda_role_arn = "arn:aws:iam::111111111111:role/example-tls-cert-test"
-  runtime         = "python3.14"
+  description         = "Issue TLS certificates"
+  dynamodb_table_name = "ExampleCATest"
+  env                 = "test"
+  filter_pattern      = ""
+  function_name       = "tls-cert"
+  lambda_role_arn     = "arn:aws:iam::111111111111:role/example-tls-cert-test"
+  runtime             = "python3.14"
 }
 
 run "matching_service_digest_is_accepted" {
