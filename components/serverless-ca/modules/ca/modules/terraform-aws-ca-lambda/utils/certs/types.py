@@ -25,8 +25,11 @@ class Subject:
     state: Optional[str] = None
     email_address: Optional[str] = None
 
-    def x509_name(self):
-        attributes = [x509.NameAttribute(NameOID.COMMON_NAME, self.common_name)]
+    def x509_name(self, common_name_last=False):
+        attributes = []
+
+        if not common_name_last:
+            attributes.append(x509.NameAttribute(NameOID.COMMON_NAME, self.common_name))
 
         if self.country:
             attributes.append(x509.NameAttribute(NameOID.COUNTRY_NAME, self.country))
@@ -45,6 +48,9 @@ class Subject:
 
         if self.state:
             attributes.append(x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, self.state))
+
+        if common_name_last:
+            attributes.append(x509.NameAttribute(NameOID.COMMON_NAME, self.common_name))
 
         return x509.Name(attributes)
 

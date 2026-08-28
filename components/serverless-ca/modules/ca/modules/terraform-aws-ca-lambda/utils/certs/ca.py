@@ -61,7 +61,7 @@ def ca_construct_subject_name(ca_info, ca_hierarchy_type="root"):
 
     subject = subject_from_ca_info(ca_info, default_common_name=default_common_name)
 
-    return subject.x509_name()
+    return subject.x509_name(common_name_last=True)
 
 
 def tls_cert_construct_subject_name(csr_cert, cert_request_info):
@@ -426,9 +426,7 @@ def ca_kms_publish_crl(
     kms_key_id = ca_key_info["KmsKeyId"]
     public_key = ca_key_info["PublicKey"]
 
-    subject = subject_from_ca_info(ca_info, "Serverless Root CA")
-
-    issuer = subject.x509_name()
+    issuer = ca_construct_subject_name(ca_info)
 
     builder = x509.CertificateRevocationListBuilder()
     builder = builder.issuer_name(x509.Name(issuer))
