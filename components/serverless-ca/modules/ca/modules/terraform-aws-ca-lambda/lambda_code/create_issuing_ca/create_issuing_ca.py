@@ -65,7 +65,7 @@ def ensure_issuing_ca_published(
         external_s3_bucket_name,
         internal_s3_bucket_name,
         f"{ca_bundle_name(project, env_name)}.pem",
-        crypto_create_ca_bundle([root_ca_cert_pem, issuing_ca_cert_pem]),
+        crypto_create_ca_bundle([root_ca_cert_pem, issuing_ca_cert_pem]).encode("utf-8"),
         "application/x-pem-file",
     )
 
