@@ -134,7 +134,7 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
 
           release_metadata="$(gh release view "$RELEASE_TAG" \
-            --repo 9spokes/terraform-components \
+            --repo "$GITHUB_REPOSITORY" \
             --json tagName,isDraft,isPrerelease,assets)"
           release_tag="$(jq --raw-output '.tagName' <<<"$release_metadata")"
           test "$release_tag" = "$RELEASE_TAG"
@@ -169,7 +169,7 @@ jobs:
 
           while IFS= read -r asset; do
             gh release download "$RELEASE_TAG" \
-              --repo 9spokes/terraform-components \
+              --repo "$GITHUB_REPOSITORY" \
               --dir release \
               --pattern "$asset"
           done < release/expected-assets
@@ -179,7 +179,9 @@ jobs:
           set -euo pipefail
 
           while IFS= read -r asset; do
-            gh attestation verify "release/$asset" --repo 9spokes/terraform-components
+            gh attestation verify "release/$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
           done < release/expected-assets
 
           sed -E 's/^[[:xdigit:]]{64}  ([^[:space:]]+)$/\1/' \
