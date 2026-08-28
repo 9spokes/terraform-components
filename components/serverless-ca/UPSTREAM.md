@@ -47,5 +47,7 @@ The upstream documentation website, images, examples, repository automation, and
 24. Make root and issuing CA initialization repair missing publication artifacts from existing DynamoDB certificates without regenerating either CA, and reject conflicting published material.
 25. Constrain issuing CA and leaf certificate validity to the expiry of their respective issuer certificates.
 26. Harden operational S3 discovery for missing buckets and empty object listings.
+27. Encode root and issuing CA distinguished names in `C, ST, L, O, OU, CN, emailAddress` order and reuse the exact
+    CA name construction for CRL issuers, without changing the upstream leaf-subject ordering contract.
 
 When updating the snapshot, review upstream changes path-by-path and update this ledger. Do not overwrite the adapted files with an unreviewed bulk copy.

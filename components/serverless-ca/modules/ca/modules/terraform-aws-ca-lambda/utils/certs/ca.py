@@ -8,7 +8,7 @@ from cryptography.x509 import (
     PolicyInformation,
     ObjectIdentifier,
 )
-from cryptography.x509.oid import AuthorityInformationAccessOID, ExtendedKeyUsageOID
+from cryptography.x509.oid import AuthorityInformationAccessOID, ExtendedKeyUsageOID, NameOID
 from cryptography.hazmat.primitives import serialization
 from .crypto import (
     crypto_select_class,
@@ -60,8 +60,17 @@ def ca_construct_subject_name(ca_info, ca_hierarchy_type="root"):
     default_common_name = f"Serverless {ca_hierarchy_type.title()} CA"
 
     subject = subject_from_ca_info(ca_info, default_common_name=default_common_name)
+    ordered_attributes = (
+        (NameOID.COUNTRY_NAME, subject.country),
+        (NameOID.STATE_OR_PROVINCE_NAME, subject.state),
+        (NameOID.LOCALITY_NAME, subject.locality),
+        (NameOID.ORGANIZATION_NAME, subject.organization),
+        (NameOID.ORGANIZATIONAL_UNIT_NAME, subject.organizational_unit),
+        (NameOID.COMMON_NAME, subject.common_name),
+        (NameOID.EMAIL_ADDRESS, subject.email_address),
+    )
 
-    return subject.x509_name()
+    return x509.Name([x509.NameAttribute(oid, value) for oid, value in ordered_attributes if value])
 
 
 def tls_cert_construct_subject_name(csr_cert, cert_request_info):
@@ -426,9 +435,7 @@ def ca_kms_publish_crl(
     kms_key_id = ca_key_info["KmsKeyId"]
     public_key = ca_key_info["PublicKey"]
 
-    subject = subject_from_ca_info(ca_info, "Serverless Root CA")
-
-    issuer = subject.x509_name()
+    issuer = ca_construct_subject_name(ca_info)
 
     builder = x509.CertificateRevocationListBuilder()
     builder = builder.issuer_name(x509.Name(issuer))
