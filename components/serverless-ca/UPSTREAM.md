@@ -49,5 +49,8 @@ The upstream documentation website, images, examples, repository automation, and
 26. Harden operational S3 discovery for missing buckets and empty object listings.
 27. Encode root and issuing CA distinguished names in `C, ST, L, O, OU, CN, emailAddress` order and reuse the exact
     CA name construction for CRL issuers, without changing the upstream leaf-subject ordering contract.
+28. Pass the Terraform-created DynamoDB table name to every CA function as `DYNAMODB_TABLE_NAME` and read it
+    before the upstream name derivation. Python `str.title()` and HCL `title()` disagree for digit-leading
+    projects (`9Spokes` versus `9spokes`), so the derived name pointed at a table that never existed.
 
 When updating the snapshot, review upstream changes path-by-path and update this ledger. Do not overwrite the adapted files with an unreviewed bulk copy.

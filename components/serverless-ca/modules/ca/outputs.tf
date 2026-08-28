@@ -184,5 +184,14 @@ output "deployment_contract" {
       architecture = module.rsa_tls_cert_lambda.deployment_contract.architecture
     }
     manifest_keys = sort(keys(aws_s3_object.cert_info))
+    lambda_table_names = merge({
+      create_rsa_root_ca_lambda    = module.create_rsa_root_ca_lambda.deployment_contract.dynamodb_table_name
+      create_rsa_issuing_ca_lambda = module.create_rsa_issuing_ca_lambda.deployment_contract.dynamodb_table_name
+      rsa_root_ca_crl_lambda       = module.rsa_root_ca_crl_lambda.deployment_contract.dynamodb_table_name
+      rsa_issuing_ca_crl_lambda    = module.rsa_issuing_ca_crl_lambda.deployment_contract.dynamodb_table_name
+      rsa_tls_cert_lambda          = module.rsa_tls_cert_lambda.deployment_contract.dynamodb_table_name
+      }, length(module.expiry_lambda) == 0 ? {} : {
+      expiry_lambda = module.expiry_lambda[0].deployment_contract.dynamodb_table_name
+    })
   }
 }

@@ -5,6 +5,7 @@ locals {
   ca_variables = {
     CUSTOM_EXTENSION_ALLOWLIST = jsonencode(var.custom_extension_allowlist)
     DOMAIN                     = var.domain
+    DYNAMODB_TABLE_NAME        = var.dynamodb_table_name
     ENVIRONMENT_NAME           = var.env
     PROD_ENVIRONMENTS          = jsonencode(var.prod_envs)
     EXPIRY_REMINDERS           = jsonencode(var.expiry_reminders)

@@ -1,5 +1,6 @@
 import boto3
 import base64
+import os
 from datetime import datetime
 from cryptography.x509 import load_pem_x509_certificate
 from cryptography.hazmat.primitives import serialization
@@ -8,8 +9,16 @@ base_table_name = "CA"
 
 
 def db_get_table_name(project, env_name):
-    # constructs the DynamoDB table name, e.g. SecureEmailCADev
+    """Returns the DynamoDB table name, preferring the exact name Terraform created"""
 
+    # Terraform is the source of truth for the table name. Deriving it here
+    # duplicates HCL title() in Python, and the two disagree for projects that
+    # start with a digit: Python's str.title() gives "9Spokes", HCL gives "9spokes".
+    configured_table_name = os.environ.get("DYNAMODB_TABLE_NAME", "").strip()
+    if configured_table_name:
+        return configured_table_name
+
+    # Upstream derivation, retained for operational utilities that run outside Lambda
     capitalised_project = project.replace("-", " ").title().replace(" ", "")
     capitalised_env_name = env_name.title()
     table_name = f"{capitalised_project}{base_table_name}{capitalised_env_name}"
