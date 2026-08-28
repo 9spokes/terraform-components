@@ -30,12 +30,12 @@ def certificate_not_valid_after_utc(certificate):
 
 
 def validity_window(issuer_certificate, lifetime, not_valid_before, now):
-    """Return a validity window capped at the issuer certificate expiry."""
+    """Return an expiry capped by both the requested interval and issuer expiry."""
     issuer_not_valid_after = certificate_not_valid_after_utc(issuer_certificate)
     if issuer_not_valid_after <= now:
         raise ValueError("Issuer certificate has expired")
 
-    requested_not_valid_after = now + timedelta(days=lifetime)
+    requested_not_valid_after = not_valid_before + timedelta(days=lifetime)
     not_valid_after = min(requested_not_valid_after, issuer_not_valid_after)
     if not_valid_after <= not_valid_before:
         raise ValueError("Issuer certificate expires before the requested certificate can become valid")
