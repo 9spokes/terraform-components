@@ -208,21 +208,112 @@ jobs:
         run: |
           set -euo pipefail
 
+          manifest_entries="${RUNNER_TEMP}/promotion-manifest.ndjson"
+          : > "$manifest_entries"
+
           while IFS= read -r asset; do
             test "$asset" != "SHA256SUMS"
-            aws s3api put-object \
+            object_key="serverless-ca/releases/${RELEASE_TAG}/${asset}"
+            sha256="$(awk -v asset="$asset" '$2 == asset { print $1 }' release/SHA256SUMS)"
+            [[ "$sha256" =~ ^[0-9a-f]{64}$ ]]
+            sha256_base64="$(printf '%s' "$sha256" | xxd -r -p | base64 -w0)"
+            content_length="$(stat --format=%s "release/${asset}")"
+            test "$content_length" -gt 0
+
+            put_response="$(aws s3api put-object \
               --region "$AWS_REGION" \
               --bucket "$ARTIFACT_BUCKET" \
-              --key "serverless-ca/releases/${RELEASE_TAG}/${asset}" \
+              --key "$object_key" \
               --body "release/${asset}" \
               --if-none-match '*' \
-              --server-side-encryption AES256
+              --server-side-encryption AES256 \
+              --output json)"
+            version_id="$(jq --exit-status --raw-output \
+              '.VersionId | strings | select(length > 0)' <<<"$put_response")"
+
+            jq --null-input --compact-output \
+              --arg asset_name "$asset" \
+              --arg object_key "$object_key" \
+              --arg version_id "$version_id" \
+              --arg sha256 "$sha256" \
+              --arg sha256_base64 "$sha256_base64" \
+              --argjson content_length "$content_length" \
+              --arg release_tag "$RELEASE_TAG" \
+              --arg source_commit "$GITHUB_SHA" \
+              --arg repository "$GITHUB_REPOSITORY" \
+              --arg workflow_run_id "$GITHUB_RUN_ID" \
+              '{
+                assetName: $asset_name,
+                objectKey: $object_key,
+                versionId: $version_id,
+                sha256: $sha256,
+                sha256Base64: $sha256_base64,
+                contentLength: $content_length,
+                releaseTag: $release_tag,
+                sourceCommit: $source_commit,
+                repository: $repository,
+                workflowRunId: $workflow_run_id
+              }' >> "$manifest_entries"
+
+            printf 'Promoted filename=%s key=%s VersionId=%s\n' \
+              "$asset" "$object_key" "$version_id"
           done < release/expected-checksummed-assets
 
-          aws s3api put-object \
+          jq --sort-keys --slurp \
+            '{schemaVersion: 1, objects: sort_by(.assetName)}' \
+            "$manifest_entries" > release/promotion-manifest.json
+
+          jq --exit-status \
+            --arg release_tag "$RELEASE_TAG" \
+            --arg source_commit "$GITHUB_SHA" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow_run_id "$GITHUB_RUN_ID" \
+            '
+              .schemaVersion == 1 and
+              (.objects | type == "array" and length == 18) and
+              ([.objects[].assetName] == ([.objects[].assetName] | sort)) and
+              ([.objects[].assetName] | unique | length == 18) and
+              all(.objects[];
+                (.assetName | type == "string" and length > 0) and
+                (.objectKey == ("serverless-ca/releases/" + $release_tag + "/" + .assetName)) and
+                (.versionId | type == "string" and length > 0) and
+                (.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+                (.sha256Base64 | type == "string" and test("^[A-Za-z0-9+/]{43}=$")) and
+                (.contentLength | type == "number" and . > 0) and
+                (.releaseTag == $release_tag) and
+                (.sourceCommit == $source_commit) and
+                (.repository == $repository) and
+                (.workflowRunId == $workflow_run_id)
+              )
+            ' release/promotion-manifest.json >/dev/null
+          jq --raw-output '.objects[].assetName' release/promotion-manifest.json \
+            > release/promoted-assets
+          diff --unified=3 release/expected-checksummed-assets release/promoted-assets
+
+          manifest_key="serverless-ca/releases/${RELEASE_TAG}/promotion-manifest.json"
+          manifest_response="$(aws s3api put-object \
             --region "$AWS_REGION" \
             --bucket "$ARTIFACT_BUCKET" \
-            --key "serverless-ca/releases/${RELEASE_TAG}/SHA256SUMS" \
+            --key "$manifest_key" \
+            --body release/promotion-manifest.json \
+            --if-none-match '*' \
+            --server-side-encryption AES256 \
+            --output json)"
+          manifest_version_id="$(jq --exit-status --raw-output \
+            '.VersionId | strings | select(length > 0)' <<<"$manifest_response")"
+          printf 'Promoted filename=%s key=%s VersionId=%s\n' \
+            promotion-manifest.json "$manifest_key" "$manifest_version_id"
+
+          completion_key="serverless-ca/releases/${RELEASE_TAG}/SHA256SUMS"
+          completion_response="$(aws s3api put-object \
+            --region "$AWS_REGION" \
+            --bucket "$ARTIFACT_BUCKET" \
+            --key "$completion_key" \
             --body release/SHA256SUMS \
             --if-none-match '*' \
-            --server-side-encryption AES256
+            --server-side-encryption AES256 \
+            --output json)"
+          completion_version_id="$(jq --exit-status --raw-output \
+            '.VersionId | strings | select(length > 0)' <<<"$completion_response")"
+          printf 'Promoted filename=%s key=%s VersionId=%s\n' \
+            SHA256SUMS "$completion_key" "$completion_version_id"
