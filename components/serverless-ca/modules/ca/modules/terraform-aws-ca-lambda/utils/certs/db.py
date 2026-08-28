@@ -17,7 +17,7 @@ def db_get_table_name(project, env_name):
     return table_name
 
 
-def db_list_certificates(project, env_name, common_name):
+def db_list_certificates(project, env_name, common_name, consistent_read=False):
     # returns list of certificates for a specified common_name
     client = boto3.client("dynamodb")
 
@@ -29,6 +29,7 @@ def db_list_certificates(project, env_name, common_name):
         TableName=table_name,
         KeyConditionExpression="CommonName = :CommonName",
         ExpressionAttributeValues={":CommonName": {"S": common_name}},
+        ConsistentRead=consistent_read,
     )
 
     return response["Items"]

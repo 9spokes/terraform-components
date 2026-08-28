@@ -63,6 +63,14 @@
       "Resource": "arn:aws:states:${region}:${account_id}:stateMachine:${project}-ca-${env}"
     },
     {
+      "Sid": "DescribeDistributedMapExecutions",
+      "Effect": "Allow",
+      "Action": [
+        "states:DescribeExecution"
+      ],
+      "Resource": "arn:aws:states:${region}:${account_id}:execution:${project}-ca-${env}:*"
+    },
+    {
       "Sid": "S3BucketLocation",
       "Effect": "Allow",
       "Action": [

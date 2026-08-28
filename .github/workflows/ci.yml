@@ -40,6 +40,13 @@ jobs:
           tofu validate
           tofu test -no-color
 
+      - name: Validate Lambda artifact digest enforcement
+        working-directory: components/serverless-ca/modules/ca/modules/terraform-aws-ca-lambda
+        run: |
+          tofu init -backend=false -input=false
+          tofu validate
+          tofu test -no-color
+
   python:
     runs-on: ubuntu-latest
     defaults:

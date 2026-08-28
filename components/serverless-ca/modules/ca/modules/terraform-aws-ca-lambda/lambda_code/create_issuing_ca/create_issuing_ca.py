@@ -9,10 +9,65 @@ from utils.certs.crypto import (
 )
 from utils.certs.ca import ca_kms_sign_ca_certificate_request, ca_name, ca_bundle_name
 from utils.certs.db import db_ca_cert_issued, db_list_certificates
-from utils.certs.s3 import s3_upload
+from utils.certs.s3 import s3_download, s3_upload
 from cryptography.x509 import load_pem_x509_certificate, load_pem_x509_csr
 
 lifetime = 3650
+
+
+def ensure_publication(
+    external_s3_bucket_name,
+    internal_s3_bucket_name,
+    key,
+    content,
+    content_type,
+):
+    """Publish persisted CA material if S3 does not already contain it."""
+    published_object = s3_download(
+        external_s3_bucket_name,
+        internal_s3_bucket_name,
+        key,
+        internal=False,
+    )
+
+    if published_object is None:
+        s3_upload(
+            external_s3_bucket_name,
+            internal_s3_bucket_name,
+            content,
+            key,
+            content_type=content_type,
+        )
+        return
+
+    if published_object["Body"].read() != content:
+        raise RuntimeError(f"Published CA artifact {key} does not match the certificate state in DynamoDB")
+
+
+def ensure_issuing_ca_published(
+    external_s3_bucket_name,
+    internal_s3_bucket_name,
+    project,
+    env_name,
+    ca_slug,
+    root_ca_cert_pem,
+    issuing_ca_cert_pem,
+):
+    """Reconcile the issuing certificate and bundle from persisted certificates."""
+    ensure_publication(
+        external_s3_bucket_name,
+        internal_s3_bucket_name,
+        f"{ca_slug}.crt",
+        issuing_ca_cert_pem,
+        "application/x-x509-ca-cert",
+    )
+    ensure_publication(
+        external_s3_bucket_name,
+        internal_s3_bucket_name,
+        f"{ca_bundle_name(project, env_name)}.pem",
+        crypto_create_ca_bundle([root_ca_cert_pem, issuing_ca_cert_pem]),
+        "application/x-pem-file",
+    )
 
 
 def lambda_handler(event, context):  # pylint:disable=unused-argument,too-many-locals
@@ -33,14 +88,46 @@ def lambda_handler(event, context):  # pylint:disable=unused-argument,too-many-l
     ca_slug = ca_name(project, env_name, "issuing")
 
     # check Root CA exists
-    if not db_list_certificates(project, env_name, root_ca_name):
+    root_ca_certificates = db_list_certificates(project, env_name, root_ca_name, consistent_read=True)
+    if not root_ca_certificates:
         print(f"CA {root_ca_name} not found")
 
         return
+    if len(root_ca_certificates) > 1:
+        raise RuntimeError(f"Expected one root certificate for {root_ca_name}, found {len(root_ca_certificates)}")
 
-    # check if Issuing CA already exists
-    if db_list_certificates(project, env_name, ca_slug):
-        print(f"CA {ca_slug} already exists. To recreate, first delete item in DynamoDB")
+    try:
+        root_ca_cert_pem = base64.b64decode(root_ca_certificates[0]["Certificate"]["B"], validate=True)
+        root_ca_cert = load_pem_x509_certificate(root_ca_cert_pem)
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(f"Persisted root certificate for {root_ca_name} is invalid") from error
+
+    # A retry after DynamoDB persisted the issuing certificate but S3
+    # publication failed must repair both artifacts without signing again.
+    existing_certificates = db_list_certificates(project, env_name, ca_slug, consistent_read=True)
+    if len(existing_certificates) > 1:
+        raise RuntimeError(f"Expected one issuing certificate for {ca_slug}, found {len(existing_certificates)}")
+
+    if existing_certificates:
+        try:
+            issuing_ca_cert_pem = base64.b64decode(
+                existing_certificates[0]["Certificate"]["B"],
+                validate=True,
+            )
+            load_pem_x509_certificate(issuing_ca_cert_pem)
+        except (KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(f"Persisted issuing certificate for {ca_slug} is invalid") from error
+
+        ensure_issuing_ca_published(
+            external_s3_bucket_name,
+            internal_s3_bucket_name,
+            project,
+            env_name,
+            ca_slug,
+            root_ca_cert_pem,
+            issuing_ca_cert_pem,
+        )
+        print(f"CA {ca_slug} already exists and its published artifacts are verified")
 
         return
 
@@ -57,12 +144,6 @@ def lambda_handler(event, context):  # pylint:disable=unused-argument,too-many-l
     csr = load_pem_x509_csr(
         crypto_kms_ca_cert_signing_request(ca_slug, kms_key_id, kms_describe_key(kms_key_id)["SigningAlgorithms"][0])
     )
-
-    # get Root CA cert in PEM format
-    root_ca_cert_pem = base64.b64decode(db_list_certificates(project, env_name, root_ca_name)[0]["Certificate"]["B"])
-
-    # deserialize Root CA cert
-    root_ca_cert = load_pem_x509_certificate(root_ca_cert_pem)
 
     # sign certificate
     pem_certificate = ca_kms_sign_ca_certificate_request(
@@ -85,13 +166,15 @@ def lambda_handler(event, context):  # pylint:disable=unused-argument,too-many-l
     # create entry in DynamoDB
     db_ca_cert_issued(project, env_name, info, base64_certificate)
 
-    # create CA bundle
-    cert_bundle_pem = crypto_create_ca_bundle([root_ca_cert_pem, pem_certificate])
-
-    # upload certificate and CA bundle to S3
-    s3_upload(external_s3_bucket_name, internal_s3_bucket_name, pem_certificate, f"{ca_slug}.crt")
-    s3_upload(
-        external_s3_bucket_name, internal_s3_bucket_name, cert_bundle_pem, f"{ca_bundle_name(project, env_name)}.pem"
+    # publish certificate and CA bundle to S3
+    ensure_issuing_ca_published(
+        external_s3_bucket_name,
+        internal_s3_bucket_name,
+        project,
+        env_name,
+        ca_slug,
+        root_ca_cert_pem,
+        pem_certificate,
     )
 
     return
