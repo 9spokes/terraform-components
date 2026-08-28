@@ -79,27 +79,156 @@ jobs:
       - name: Static security checks
         run: bandit -q -r modules/terraform-aws-ca-lambda/lambda_code modules/terraform-aws-ca-lambda/utils
 
-  package:
+  package-lambda:
+    name: package-lambda (${{ matrix.architecture }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture:
+          - x86_64
+          - arm64
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up arm64 emulation
+        if: matrix.architecture == 'arm64'
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
           image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
           platforms: arm64
           cache-image: false
 
-      - name: Build Lambda packages twice
+      - name: Build and verify Lambda packages twice
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
+          PIP_CACHE_DIR: ${{ runner.temp }}/pip-cache-${{ matrix.architecture }}
         run: |
-          scripts/build-serverless-ca-lambdas.sh "${RUNNER_TEMP}/build-a"
-          scripts/build-serverless-ca-lambdas.sh "${RUNNER_TEMP}/build-b"
-          diff -u "${RUNNER_TEMP}/build-a/SHA256SUMS" "${RUNNER_TEMP}/build-b/SHA256SUMS"
+          set -euo pipefail
+          expected_zips=(
+            "create_issuing_ca-${ARCHITECTURE}.zip"
+            "create_root_ca-${ARCHITECTURE}.zip"
+            "expiry-${ARCHITECTURE}.zip"
+            "issuing_ca_crl-${ARCHITECTURE}.zip"
+            "notify-${ARCHITECTURE}.zip"
+            "root_ca_crl-${ARCHITECTURE}.zip"
+            "tls_cert-${ARCHITECTURE}.zip"
+          )
+          build_a="${RUNNER_TEMP}/build-a-${ARCHITECTURE}"
+          build_b="${RUNNER_TEMP}/build-b-${ARCHITECTURE}"
+          expected_list="${RUNNER_TEMP}/expected-${ARCHITECTURE}"
+          actual_list="${RUNNER_TEMP}/actual-${ARCHITECTURE}"
+          checksummed_list="${RUNNER_TEMP}/checksummed-${ARCHITECTURE}"
+
+          scripts/build-serverless-ca-lambdas.sh "$build_a" "$ARCHITECTURE"
+          scripts/build-serverless-ca-lambdas.sh "$build_b" "$ARCHITECTURE"
+          diff -u "$build_a/SHA256SUMS" "$build_b/SHA256SUMS"
+          (cd "$build_a" && sha256sum --strict --check SHA256SUMS)
+
+          printf '%s\n' "${expected_zips[@]}" | LC_ALL=C sort > "$expected_list"
+          find "$build_a" -maxdepth 1 -type f -name '*.zip' -printf '%f\n' | LC_ALL=C sort > "$actual_list"
+          diff -u "$expected_list" "$actual_list"
+          sed -E 's/^[[:xdigit:]]{64}  ([^[:space:]]+)$/\1/' "$build_a/SHA256SUMS" | LC_ALL=C sort > "$checksummed_list"
+          diff -u "$expected_list" "$checksummed_list"
+
+          verified_dir="${RUNNER_TEMP}/verified/${ARCHITECTURE}"
+          mkdir -p "$verified_dir"
+          for zip_name in "${expected_zips[@]}"; do
+            cp "$build_a/$zip_name" "$verified_dir/$zip_name"
+          done
+          cp "$build_a/SHA256SUMS" "$verified_dir/SHA256SUMS"
+
+      - name: Upload verified Lambda packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: serverless-ca-lambda-${{ matrix.architecture }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/verified/${{ matrix.architecture }}
+          retention-days: 7
+
+  package:
+    needs:
+      - terraform
+      - python
+      - package-lambda
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download verified x86_64 Lambda packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: serverless-ca-lambda-x86_64
+          path: ${{ runner.temp }}/lambda-artifacts/x86_64
+
+      - name: Download verified arm64 Lambda packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: serverless-ca-lambda-arm64
+          path: ${{ runner.temp }}/lambda-artifacts/arm64
+
+      - name: Verify Lambda artifacts and assemble combined checksums
+        run: |
+          set -euo pipefail
+          artifact_root="${RUNNER_TEMP}/lambda-artifacts"
+          output_dir="${RUNNER_TEMP}/package-output"
+          mkdir -p "$output_dir"
+          expected_x86_64=(
+            create_issuing_ca-x86_64.zip
+            create_root_ca-x86_64.zip
+            expiry-x86_64.zip
+            issuing_ca_crl-x86_64.zip
+            notify-x86_64.zip
+            root_ca_crl-x86_64.zip
+            tls_cert-x86_64.zip
+          )
+          expected_arm64=(
+            create_issuing_ca-arm64.zip
+            create_root_ca-arm64.zip
+            expiry-arm64.zip
+            issuing_ca_crl-arm64.zip
+            notify-arm64.zip
+            root_ca_crl-arm64.zip
+            tls_cert-arm64.zip
+          )
+          expected_all=(
+            "${expected_x86_64[@]}"
+            "${expected_arm64[@]}"
+          )
+
+          for architecture in x86_64 arm64; do
+            artifact_dir="$artifact_root/$architecture"
+            if [[ "$architecture" == x86_64 ]]; then
+              expected_zips=("${expected_x86_64[@]}")
+            else
+              expected_zips=("${expected_arm64[@]}")
+            fi
+            printf '%s\n' "${expected_zips[@]}" SHA256SUMS | LC_ALL=C sort > "$RUNNER_TEMP/expected-artifact-$architecture"
+            find "$artifact_dir" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort > "$RUNNER_TEMP/actual-artifact-$architecture"
+            diff -u "$RUNNER_TEMP/expected-artifact-$architecture" "$RUNNER_TEMP/actual-artifact-$architecture"
+            (cd "$artifact_dir" && sha256sum --strict --check SHA256SUMS)
+            sed -E 's/^[[:xdigit:]]{64}  ([^[:space:]]+)$/\1/' "$artifact_dir/SHA256SUMS" | LC_ALL=C sort > "$RUNNER_TEMP/checksummed-artifact-$architecture"
+            printf '%s\n' "${expected_zips[@]}" | LC_ALL=C sort > "$RUNNER_TEMP/expected-checksummed-$architecture"
+            diff -u "$RUNNER_TEMP/expected-checksummed-$architecture" "$RUNNER_TEMP/checksummed-artifact-$architecture"
+            for zip_name in "${expected_zips[@]}"; do
+              cp "$artifact_dir/$zip_name" "$output_dir/$zip_name"
+            done
+          done
+
+          printf '%s\n' "${expected_all[@]}" | LC_ALL=C sort > "$RUNNER_TEMP/expected-all-zips"
+          find "$output_dir" -maxdepth 1 -type f -name '*.zip' -printf '%f\n' | LC_ALL=C sort > "$RUNNER_TEMP/actual-all-zips"
+          diff -u "$RUNNER_TEMP/expected-all-zips" "$RUNNER_TEMP/actual-all-zips"
+          cat "$artifact_root/x86_64/SHA256SUMS" "$artifact_root/arm64/SHA256SUMS" | LC_ALL=C sort -k2 > "$output_dir/SHA256SUMS"
+          (cd "$output_dir" && sha256sum --strict --check SHA256SUMS)
 
       - name: Build component package twice
         run: |
+          set -euo pipefail
           scripts/package-serverless-ca-component.py "${RUNNER_TEMP}/component-a.zip"
           scripts/package-serverless-ca-component.py "${RUNNER_TEMP}/component-b.zip"
           test "$(sha256sum "${RUNNER_TEMP}/component-a.zip" | cut -d " " -f 1)" = "$(sha256sum "${RUNNER_TEMP}/component-b.zip" | cut -d " " -f 1)"
@@ -110,7 +239,20 @@ jobs:
           name: serverless-ca-packages
           if-no-files-found: error
           path: |
-            ${{ runner.temp }}/build-a/*.zip
-            ${{ runner.temp }}/build-a/SHA256SUMS
+            ${{ runner.temp }}/package-output/create_issuing_ca-x86_64.zip
+            ${{ runner.temp }}/package-output/create_issuing_ca-arm64.zip
+            ${{ runner.temp }}/package-output/create_root_ca-x86_64.zip
+            ${{ runner.temp }}/package-output/create_root_ca-arm64.zip
+            ${{ runner.temp }}/package-output/expiry-x86_64.zip
+            ${{ runner.temp }}/package-output/expiry-arm64.zip
+            ${{ runner.temp }}/package-output/issuing_ca_crl-x86_64.zip
+            ${{ runner.temp }}/package-output/issuing_ca_crl-arm64.zip
+            ${{ runner.temp }}/package-output/notify-x86_64.zip
+            ${{ runner.temp }}/package-output/notify-arm64.zip
+            ${{ runner.temp }}/package-output/root_ca_crl-x86_64.zip
+            ${{ runner.temp }}/package-output/root_ca_crl-arm64.zip
+            ${{ runner.temp }}/package-output/tls_cert-x86_64.zip
+            ${{ runner.temp }}/package-output/tls_cert-arm64.zip
+            ${{ runner.temp }}/package-output/SHA256SUMS
             ${{ runner.temp }}/component-a.zip
           retention-days: 7
