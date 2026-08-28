@@ -42,7 +42,8 @@ The upstream documentation website, images, examples, repository automation, and
 19. Create the Scheduler in `DISABLED` state by default. Operators explicitly initialize and verify the CA before setting `scheduler_enabled = true` in a later apply.
 20. Reject parsed CSRs with an invalid signature before duplicate-key registration or signing, while preserving the upstream request subject and SAN override contract.
 21. Preserve the selected ECDSA signing hash in generated CSRs and KMS signing calls without mutating cryptography caller objects.
-22. Verify the service-reported digest of every deployed Lambda package against the declared artifact SHA-256 digest.
+22. Verify the service-reported digest of every deployed Lambda package against the declared artifact SHA-256 digest
+    after create and update, while allowing the provider to plan a replacement from the currently deployed digest.
 23. Grant the Step Functions role scoped access to describe Distributed Map child executions while retaining state-machine-scoped start permission.
 24. Make root and issuing CA initialization repair missing publication artifacts from existing DynamoDB certificates without regenerating either CA, and reject conflicting published material.
 25. Constrain issuing CA and leaf certificate validity to the expiry of their respective issuer certificates.
