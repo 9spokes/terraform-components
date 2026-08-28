@@ -108,3 +108,119 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: dist/*
+
+  promote-serverless-ca-artifacts:
+    needs: package
+    runs-on: ubuntu-latest
+    environment: serverless-ca-artifact-promotion
+    permissions:
+      contents: read
+      id-token: write
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      ARTIFACT_BUCKET: ${{ vars.ARTIFACT_BUCKET }}
+    steps:
+      - name: Validate and download the published release
+        run: |
+          set -euo pipefail
+
+          test "$GITHUB_REPOSITORY" = "9spokes/terraform-components"
+          # RELEASE_TAG is supplied from github.ref_name at job scope.
+          # shellcheck disable=SC2153
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+
+          release_metadata="$(gh release view "$RELEASE_TAG" \
+            --repo 9spokes/terraform-components \
+            --json tagName,isDraft,isPrerelease,assets)"
+          release_tag="$(jq --raw-output '.tagName' <<<"$release_metadata")"
+          test "$release_tag" = "$RELEASE_TAG"
+          jq --exit-status '.isDraft == false and .isPrerelease == false' \
+            <<<"$release_metadata" >/dev/null
+
+          expected_assets=(
+            create_root_ca-x86_64.zip
+            create_root_ca-arm64.zip
+            create_issuing_ca-x86_64.zip
+            create_issuing_ca-arm64.zip
+            root_ca_crl-x86_64.zip
+            root_ca_crl-arm64.zip
+            issuing_ca_crl-x86_64.zip
+            issuing_ca_crl-arm64.zip
+            tls_cert-x86_64.zip
+            tls_cert-arm64.zip
+            expiry-x86_64.zip
+            expiry-arm64.zip
+            notify-x86_64.zip
+            notify-arm64.zip
+            serverless-ca-component.zip
+            serverless-ca-component.spdx.json
+            serverless-ca-lambdas.spdx.json
+            provenance.json
+            SHA256SUMS
+          )
+          mkdir release
+          printf '%s\n' "${expected_assets[@]}" | sort > release/expected-assets
+          jq --raw-output '.assets[].name' <<<"$release_metadata" | sort > release/release-assets
+          diff --unified=3 release/expected-assets release/release-assets
+
+          while IFS= read -r asset; do
+            gh release download "$RELEASE_TAG" \
+              --repo 9spokes/terraform-components \
+              --dir release \
+              --pattern "$asset"
+          done < release/expected-assets
+
+      - name: Verify release attestations and checksums
+        run: |
+          set -euo pipefail
+
+          while IFS= read -r asset; do
+            gh attestation verify "release/$asset" --repo 9spokes/terraform-components
+          done < release/expected-assets
+
+          sed -E 's/^[[:xdigit:]]{64}  ([^[:space:]]+)$/\1/' \
+            release/SHA256SUMS | sort > release/checksummed-assets
+          grep --invert-match '^SHA256SUMS$' release/expected-assets \
+            > release/expected-checksummed-assets
+          diff --unified=3 release/expected-checksummed-assets release/checksummed-assets
+          (cd release && sha256sum --strict --check SHA256SUMS)
+
+      - name: Require applied promotion environment configuration
+        run: |
+          set -euo pipefail
+          test -n "$AWS_REGION"
+          test -n "$AWS_ROLE_ARN"
+          test -n "$ARTIFACT_BUCKET"
+
+      - name: Configure promotion credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+
+      - name: Promote immutable release assets
+        run: |
+          set -euo pipefail
+
+          while IFS= read -r asset; do
+            test "$asset" != "SHA256SUMS"
+            aws s3api put-object \
+              --region "$AWS_REGION" \
+              --bucket "$ARTIFACT_BUCKET" \
+              --key "serverless-ca/releases/${RELEASE_TAG}/${asset}" \
+              --body "release/${asset}" \
+              --if-none-match '*' \
+              --server-side-encryption AES256
+          done < release/expected-checksummed-assets
+
+          aws s3api put-object \
+            --region "$AWS_REGION" \
+            --bucket "$ARTIFACT_BUCKET" \
+            --key "serverless-ca/releases/${RELEASE_TAG}/SHA256SUMS" \
+            --body release/SHA256SUMS \
+            --if-none-match '*' \
+            --server-side-encryption AES256
