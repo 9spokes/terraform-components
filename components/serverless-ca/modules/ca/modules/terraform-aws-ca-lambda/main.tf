@@ -24,7 +24,14 @@ resource "aws_lambda_function" "lambda" {
 
   lifecycle {
     postcondition {
-      condition     = self.code_sha256 == var.artifact.sha256
+      # The AWS provider keeps the current code_sha256 during planning but marks
+      # last_modified unknown when code will be replaced. Defer only that planned
+      # replacement; after apply, last_modified is known and the service-reported
+      # digest must match the declared immutable artifact.
+      condition = (
+        self.code_sha256 == var.artifact.sha256 ||
+        self.last_modified == null
+      )
       error_message = "AWS Lambda deployed code digest does not match the declared immutable artifact SHA-256 digest."
     }
   }

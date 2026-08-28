@@ -16,9 +16,10 @@ mock_provider "aws" {
 
   mock_resource "aws_lambda_function" {
     defaults = {
-      arn         = "arn:aws:lambda:ap-southeast-2:111111111111:function:example-tls-cert-test"
-      code_sha256 = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
-      version     = "1"
+      arn           = "arn:aws:lambda:ap-southeast-2:111111111111:function:example-tls-cert-test"
+      code_sha256   = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+      last_modified = "2026-08-29T00:00:00.000+0000"
+      version       = "1"
     }
   }
 
