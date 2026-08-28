@@ -10,6 +10,7 @@ from cryptography.x509.oid import NameOID
 from utils.certs.ca import (
     ca_build_cert,
     ca_kms_sign_ca_certificate_request,
+    ca_kms_sign_tls_certificate_request,
     certificate_not_valid_after_utc,
 )
 
@@ -98,24 +99,68 @@ def test_expired_issuer_is_rejected():
         )
 
 
-def test_short_requested_lifetime_remains_shorter_than_issuer():
+def test_ordinary_requested_lifetime_is_exact_and_shorter_than_issuer():
     issuing_key = ec.generate_private_key(ec.SECP256R1())
     issuing_certificate = _certificate(
         "Issuing CA",
         issuing_key,
-        datetime.now(timezone.utc) + timedelta(days=30),
+        datetime.now(timezone.utc) + timedelta(days=60),
     )
     leaf_key = ec.generate_private_key(ec.SECP256R1())
 
     leaf_certificate = ca_build_cert(
         _csr("leaf.example.com", leaf_key),
         issuing_certificate,
-        lifetime=1,
+        lifetime=30,
         delta=timedelta(minutes=5),
         cert_request_info={"Purposes": ["server_auth"], "Extensions": []},
     ).sign(issuing_key, hashes.SHA256())
 
     assert leaf_certificate.not_valid_after_utc < issuing_certificate.not_valid_after_utc
+    assert (
+        leaf_certificate.not_valid_after_utc - leaf_certificate.not_valid_before_utc
+        == timedelta(days=30)
+    )
+
+
+@pytest.mark.parametrize("requested_lifetime", [365, 366])
+def test_leaf_total_validity_interval_is_capped_at_maximum(requested_lifetime):
+    issuing_key = ec.generate_private_key(ec.SECP256R1())
+    issuing_certificate = _certificate(
+        "Issuing CA",
+        issuing_key,
+        datetime.now(timezone.utc) + timedelta(days=400),
+    )
+    leaf_key = ec.generate_private_key(ec.SECP256R1())
+
+    with (
+        patch(
+            "utils.certs.ca.crypto_select_class", return_value=lambda *_: issuing_key
+        ),
+        patch("utils.certs.ca.crypto_hash_class", return_value=hashes.SHA256()),
+    ):
+        certificate_pem = ca_kms_sign_tls_certificate_request(
+            "example",
+            "test",
+            "ca.example.com",
+            365,
+            {
+                "CsrCert": _csr("leaf.example.com", leaf_key),
+                "Extensions": [],
+                "Lifetime": requested_lifetime,
+                "Purposes": ["server_auth"],
+                "x509Sans": [],
+            },
+            issuing_certificate,
+            "issuing-key",
+            False,
+        )
+
+    leaf_certificate = x509.load_pem_x509_certificate(certificate_pem)
+    assert (
+        leaf_certificate.not_valid_after_utc - leaf_certificate.not_valid_before_utc
+        == timedelta(days=365)
+    )
 
 
 def test_legacy_naive_issuer_expiry_is_normalized_to_utc():
