@@ -1,6 +1,6 @@
 module "vpc" {
   source  = "cloudposse/stack-config/yaml//modules/remote-state"
-  version = "1.5.0"
+  version = "2.0.0"
 
   bypass    = !local.enabled
   component = var.vpc_component_name
