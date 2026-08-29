@@ -50,6 +50,17 @@ variable "description" {
   description = "description of Lambda function purpose"
 }
 
+variable "dynamodb_table_name" {
+  description = "Exact DynamoDB table name created by Terraform; CA functions read it instead of deriving a name"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.function_name == "notify" || (var.dynamodb_table_name != null && var.dynamodb_table_name != "")
+    error_message = "Every CA function must receive the Terraform-created DynamoDB table name."
+  }
+}
+
 variable "domain" {
   description = "Hosted zone domain, e.g. dev.ca.example.com"
   default     = ""

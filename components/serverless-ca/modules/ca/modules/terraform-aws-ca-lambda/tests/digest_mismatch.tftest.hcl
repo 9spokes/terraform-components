@@ -16,9 +16,10 @@ mock_provider "aws" {
 
   mock_resource "aws_lambda_function" {
     defaults = {
-      arn         = "arn:aws:lambda:ap-southeast-2:111111111111:function:example-tls-cert-test"
-      code_sha256 = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
-      version     = "1"
+      arn           = "arn:aws:lambda:ap-southeast-2:111111111111:function:example-tls-cert-test"
+      code_sha256   = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+      last_modified = "2026-08-29T00:00:00.000+0000"
+      version       = "1"
     }
   }
 
@@ -38,12 +39,13 @@ variables {
     version_id   = "version-tls-cert"
     sha256       = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
   }
-  description     = "Issue TLS certificates"
-  env             = "test"
-  filter_pattern  = ""
-  function_name   = "tls-cert"
-  lambda_role_arn = "arn:aws:iam::111111111111:role/example-tls-cert-test"
-  runtime         = "python3.14"
+  description         = "Issue TLS certificates"
+  dynamodb_table_name = "ExampleCATest"
+  env                 = "test"
+  filter_pattern      = ""
+  function_name       = "tls-cert"
+  lambda_role_arn     = "arn:aws:iam::111111111111:role/example-tls-cert-test"
+  runtime             = "python3.14"
 }
 
 run "mismatched_service_digest_is_rejected" {

@@ -21,5 +21,6 @@ output "deployment_contract" {
     architecture                  = var.architecture
     retention_in_days             = var.retention_in_days
     allowed_invocation_principals = var.allowed_invocation_principals
+    dynamodb_table_name           = var.dynamodb_table_name
   }
 }

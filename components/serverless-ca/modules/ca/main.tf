@@ -231,6 +231,7 @@ module "create_rsa_root_ca_lambda" {
   filter_pattern                  = var.filter_pattern
   root_ca_info                    = var.root_ca_info
   lambda_role_arn                 = module.create_root_ca_iam.lambda_role_arn
+  dynamodb_table_name             = module.dynamodb.ddb_table_name
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
   architecture                    = var.lambda_architecture
@@ -261,6 +262,7 @@ module "create_rsa_issuing_ca_lambda" {
   filter_pattern                  = var.filter_pattern
   issuing_ca_info                 = var.issuing_ca_info
   lambda_role_arn                 = module.create_issuing_ca_iam.lambda_role_arn
+  dynamodb_table_name             = module.dynamodb.ddb_table_name
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
   architecture                    = var.lambda_architecture
@@ -293,6 +295,7 @@ module "rsa_root_ca_crl_lambda" {
   root_crl_days                   = var.root_crl_days
   root_crl_seconds                = var.root_crl_seconds
   lambda_role_arn                 = module.root_crl_iam.lambda_role_arn
+  dynamodb_table_name             = module.dynamodb.ddb_table_name
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
   architecture                    = var.lambda_architecture
@@ -325,6 +328,7 @@ module "rsa_issuing_ca_crl_lambda" {
   issuing_crl_days                = var.issuing_crl_days
   issuing_crl_seconds             = var.issuing_crl_seconds
   lambda_role_arn                 = module.issuing_crl_iam.lambda_role_arn
+  dynamodb_table_name             = module.dynamodb.ddb_table_name
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
   architecture                    = var.lambda_architecture
@@ -355,6 +359,7 @@ module "rsa_tls_cert_lambda" {
   filter_pattern                  = var.filter_pattern
   issuing_ca_info                 = var.issuing_ca_info
   lambda_role_arn                 = module.tls_keygen_iam.lambda_role_arn
+  dynamodb_table_name             = module.dynamodb.ddb_table_name
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
   architecture                    = var.lambda_architecture
@@ -389,6 +394,7 @@ module "expiry_lambda" {
   filter_pattern                  = var.filter_pattern
   issuing_ca_info                 = var.issuing_ca_info
   lambda_role_arn                 = module.expiry_iam[0].lambda_role_arn
+  dynamodb_table_name             = module.dynamodb.ddb_table_name
   domain                          = var.hosted_zone_domain
   runtime                         = local.runtime
   architecture                    = var.lambda_architecture

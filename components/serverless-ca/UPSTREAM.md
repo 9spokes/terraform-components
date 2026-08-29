@@ -42,12 +42,16 @@ The upstream documentation website, images, examples, repository automation, and
 19. Create the Scheduler in `DISABLED` state by default. Operators explicitly initialize and verify the CA before setting `scheduler_enabled = true` in a later apply.
 20. Reject parsed CSRs with an invalid signature before duplicate-key registration or signing, while preserving the upstream request subject and SAN override contract.
 21. Preserve the selected ECDSA signing hash in generated CSRs and KMS signing calls without mutating cryptography caller objects.
-22. Verify the service-reported digest of every deployed Lambda package against the declared artifact SHA-256 digest.
+22. Verify the service-reported digest of every deployed Lambda package against the declared artifact SHA-256 digest
+    after create and update, while allowing the provider to plan a replacement from the currently deployed digest.
 23. Grant the Step Functions role scoped access to describe Distributed Map child executions while retaining state-machine-scoped start permission.
 24. Make root and issuing CA initialization repair missing publication artifacts from existing DynamoDB certificates without regenerating either CA, and reject conflicting published material.
 25. Constrain issuing CA and leaf certificate validity to the expiry of their respective issuer certificates.
 26. Harden operational S3 discovery for missing buckets and empty object listings.
 27. Encode root and issuing CA distinguished names in `C, ST, L, O, OU, CN, emailAddress` order and reuse the exact
     CA name construction for CRL issuers, without changing the upstream leaf-subject ordering contract.
+28. Pass the Terraform-created DynamoDB table name to every CA function as `DYNAMODB_TABLE_NAME` and read it
+    before the upstream name derivation. Python `str.title()` and HCL `title()` disagree for digit-leading
+    projects (`9Spokes` versus `9spokes`), so the derived name pointed at a table that never existed.
 
 When updating the snapshot, review upstream changes path-by-path and update this ledger. Do not overwrite the adapted files with an unreviewed bulk copy.
